@@ -6,10 +6,11 @@ window.EST_CONFIG = {
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'Estaciona',
   AUTOR: 'CodeFix · Josué Castillo',
-  VERSION: '1.0.2',
-  // Mapa: Santiago por defecto. Teselas de OpenStreetMap: gratis y sin API key.
+  VERSION: '1.0.3',
+  // Mapa: Santiago por defecto. OpenFreeMap (vectorial) y OpenStreetMap de respaldo: gratis y sin API key.
   CENTRO: [-33.4489, -70.6693],
   ZOOM: 12,
+  ESTILO: 'https://tiles.openfreemap.org/styles/positron',
   TILES: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  ATRIBUCION: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  ATRIBUCION: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
 };

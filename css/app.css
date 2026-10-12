@@ -296,4 +296,8 @@ input[type=color] { padding: 2px; height: 44px; width: 64px; }
 .tabla td:not(:first-child), .tabla th:not(:first-child) { text-align: center; }
 code.key { font: 700 15px ui-monospace, monospace; letter-spacing: .05em; }
 .leaflet-container .pop a.btn { color: var(--brand-ink); }
-.tiles-oscuro { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6); }
+.tiles-gris { filter: grayscale(1) contrast(1.15) brightness(1.04); }
+.tiles-gris.tiles-oscuro { filter: grayscale(1) invert(1) brightness(.85) contrast(1.1); }
+#mapa, .mini-mapa { background: #fff; }
+:root[data-theme="dark"] #mapa, :root[data-theme="dark"] .mini-mapa { background: #0b0f19; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #mapa, :root:not([data-theme="light"]) .mini-mapa { background: #0b0f19; } }

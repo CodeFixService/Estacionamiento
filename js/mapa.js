@@ -7,9 +7,51 @@
   const F = { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false };
   try { Object.assign(F, JSON.parse(localStorage.getItem('est:filtros')) || {}); } catch (e) { /* nada */ }
 
-  // Mapa gratis y sin API key (OpenStreetMap). En modo oscuro se oscurece con un filtro.
+  /* ---------- Estilo del mapa: blanco, calles negras, sin relieve ni áreas de color ----------
+     Mapa vectorial de OpenFreeMap (gratis, sin API key). Si falla, usa OpenStreetMap en gris. */
+  let estiloBase = null;
+  const minis = [];
+  function estiloLimpio() {
+    if (!estiloBase) estiloBase = fetch(cfg.ESTILO).then((r) => { if (!r.ok) throw new Error('estilo'); return r.json(); });
+    return estiloBase.then((base) => {
+      const st = JSON.parse(JSON.stringify(base)), os = g.U.oscuro();
+      const fondo = os ? '#0b0f19' : '#ffffff', calle = os ? '#e5e7eb' : '#111111', tunel = os ? '#4b5563' : '#9ca3af',
+        agua = os ? '#172233' : '#e6edf3', texto = os ? '#e5e7eb' : '#1f2937';
+      const fuera = ['landuse', 'landcover', 'park', 'building', 'aeroway', 'boundary', 'mountain_peak', 'aerodrome_label', 'poi', 'housenumber'];
+      st.layers = st.layers.filter((l) => {
+        const sl = l['source-layer'] || '';
+        if (l.type === 'background') { l.paint = { 'background-color': fondo }; return true; }
+        if (['hillshade', 'raster', 'fill-extrusion', 'heatmap'].includes(l.type) || fuera.includes(sl)) return false;
+        if (sl === 'water') { if (l.type !== 'fill') return false; l.paint = { 'fill-color': agua }; return true; }
+        if (sl === 'waterway') { l.paint = Object.assign({}, l.paint, { 'line-color': agua }); return true; }
+        if (sl === 'transportation') {
+          if (l.type !== 'line' || /rail|transit|ferry|aerialway|cablecar/.test(l.id)) return false;
+          l.paint = Object.assign({}, l.paint, { 'line-color': /tunnel/.test(l.id) ? tunel : calle, 'line-opacity': 1 });
+          return true;
+        }
+        if (l.type === 'symbol') {
+          l.paint = Object.assign({}, l.paint, { 'text-color': texto, 'text-halo-color': fondo, 'text-halo-width': 1.4 });
+          return true;
+        }
+        return false;
+      });
+      return st;
+    });
+  }
+  function raster(m) {
+    return L.tileLayer(cfg.TILES, { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      className: 'tiles-gris' + (g.U.oscuro() ? ' tiles-oscuro' : '') }).addTo(m);
+  }
   function teselas(m) {
-    return L.tileLayer(cfg.TILES, { maxZoom: 19, attribution: cfg.ATRIBUCION, className: g.U.oscuro() ? 'tiles-oscuro' : '' }).addTo(m);
+    if (!g.maplibregl || !L.maplibreGL) return raster(m);
+    let capa;
+    try {
+      capa = L.maplibreGL({ style: { version: 8, sources: {}, layers: [{ id: 'fondo', type: 'background', paint: { 'background-color': g.U.oscuro() ? '#0b0f19' : '#ffffff' } }] },
+        attribution: cfg.ATRIBUCION, interactive: false }).addTo(m);
+    } catch (e) { if (capa) m.removeLayer(capa); return raster(m); }
+    if (m.attributionControl) m.attributionControl.addAttribution(cfg.ATRIBUCION);
+    estiloLimpio().then((st) => capa.getMaplibreMap().setStyle(st)).catch(() => { m.removeLayer(capa); raster(m); });
+    return capa;
   }
 
   /* ---------- Geocodificación (OpenStreetMap / Nominatim) ---------- */
@@ -151,7 +193,7 @@
     iniciado = true;
     let vista = null;
     try { vista = JSON.parse(sessionStorage.getItem('est:vista')); } catch (e) { /* nada */ }
-    mapa = L.map('mapa', { zoomControl: false, attributionControl: true, minZoom: 5 }).setView(vista ? vista.c : cfg.CENTRO, vista ? vista.z : cfg.ZOOM);
+    mapa = L.map('mapa', { maxZoom: 19, zoomControl: false, attributionControl: true, minZoom: 5 }).setView(vista ? vista.c : cfg.CENTRO, vista ? vista.z : cfg.ZOOM);
     capa = teselas(mapa);
     grupo = L.markerClusterGroup({ maxClusterRadius: 45, showCoverageOnHover: false, spiderfyOnMaxZoom: true, disableClusteringAtZoom: 16 });
     mapa.addLayer(grupo);
@@ -192,7 +234,8 @@
 
   /* ---------- Mapas chicos ---------- */
   function mini(el, lat, lng, exacta) {
-    const m = L.map(el, { zoomControl: false, attributionControl: false, dragging: !L.Browser.mobile, scrollWheelZoom: false, tap: false }).setView([lat, lng], exacta ? 16 : 15);
+    const m = L.map(el, { maxZoom: 19, zoomControl: false, attributionControl: false, dragging: !L.Browser.mobile, scrollWheelZoom: false, tap: false }).setView([lat, lng], exacta ? 16 : 15);
+    minis.push(m);
     teselas(m);
     if (exacta) L.marker([lat, lng], { icon: L.divIcon({ className: 'pin-wrap', html: '<span class="pin sel">📍 Aquí</span>', iconSize: [0, 0] }) }).addTo(m);
     else L.circle([lat, lng], { radius: 250, color: '#2563eb', weight: 2, fillOpacity: 0.12 }).addTo(m);
@@ -202,7 +245,8 @@
   // Mapa para marcar la ubicación al publicar: toca o arrastra el pin.
   function selector(el, lat, lng, alCambiar) {
     const ini = lat ? [lat, lng] : (mapa ? [mapa.getCenter().lat, mapa.getCenter().lng] : cfg.CENTRO);
-    const m = L.map(el, { zoomControl: true, attributionControl: false, tap: false }).setView(ini, lat ? 17 : 13);
+    const m = L.map(el, { maxZoom: 19, zoomControl: true, attributionControl: false, tap: false }).setView(ini, lat ? 17 : 13);
+    minis.push(m);
     teselas(m);
     let mk = null;
     const poner = (ll, avisar) => {
@@ -220,6 +264,8 @@
 
   g.Mapa = {
     iniciar, buscar, inverso, mini, selector, caracs,
+    // Libera los mapas chicos (WebGL) al salir de una pantalla.
+    limpiar() { while (minis.length) { try { minis.pop().remove(); } catch (e) { /* ya no existe */ } } },
     refrescar() { if (mapa) { setTimeout(() => { mapa.invalidateSize(); cargar(false); }, 60); } },
     recargar() { if (mapa) cargar(true); }
   };

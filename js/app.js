@@ -696,6 +696,7 @@
   ];
   function router() {
     clearInterval(pollChat); pollChat = null;
+    g.Mapa.limpiar();
     const h = location.hash.replace(/^#/, '');
     let ruta = RUTAS[0], m = null;
     for (const r of RUTAS) { m = h.match(r[0]); if (m) { ruta = r; break; } }
