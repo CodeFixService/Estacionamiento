@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estaciona</title>
+<meta name="description" content="Arrienda o publica estacionamientos en Santiago. Personas verificadas, mapa interactivo y chat seguro.">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="vendor/MarkerCluster.css">
+<link rel="stylesheet" href="css/app.css">
+<script>
+  // Tema antes de pintar (sin parpadeo).
+  try {
+    var t = localStorage.getItem('est:tema'); if (t) document.documentElement.dataset.theme = t;
+    var c = localStorage.getItem('est:color'); if (c) document.documentElement.style.setProperty('--brand', c);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<header class="top">
+  <a href="#/" class="logo" aria-label="Estaciona, inicio"><span class="logo-p">P</span><b>Estaciona</b></a>
+  <div class="top-acc">
+    <a href="#/avisos" class="icon-btn" id="btnAvisos" aria-label="Avisos" hidden><span data-i="bell"></span><i class="badge" id="bAvisos"></i></a>
+    <a href="#/admin" class="chip-admin" id="btnAdmin" hidden>ADMIN</a>
+    <button class="btn small" id="btnEntrar" type="button">Ingresar</button>
+    <a href="#/cuenta" class="mini-av" id="miniAv" hidden aria-label="Mi cuenta"></a>
+  </div>
+</header>
+
+<div id="mapaVista" class="mapa-vista">
+  <div id="mapa"></div>
+  <div class="mapa-ui">
+    <form class="buscador" id="fBuscar" autocomplete="off">
+      <span data-i="search"></span>
+      <input id="qBuscar" type="search" placeholder="Busca una dirección o comuna" aria-label="Buscar dirección">
+      <button type="button" class="icon-btn" id="btnFiltros" aria-label="Filtros"><span data-i="sliders"></span><i class="badge dot" id="bFiltros"></i></button>
+    </form>
+    <div class="resultados-busqueda" id="resBuscar" hidden></div>
+    <div class="chips-filtro" id="chipsFiltro"></div>
+  </div>
+  <div class="mapa-fabs">
+    <button class="fab" id="btnLista" type="button" aria-label="Ver lista"><span data-i="list"></span></button>
+    <button class="fab" id="btnCerca" type="button" aria-label="Cerca de mí"><span data-i="locate"></span></button>
+  </div>
+  <div class="mapa-info" id="mapaInfo"></div>
+  <div class="hoja" id="hojaLista" hidden>
+    <div class="hoja-cab"><b id="listaTit">Estacionamientos</b><button class="icon-btn" id="cerrarLista" type="button" aria-label="Cerrar"><span data-i="x"></span></button></div>
+    <div class="hoja-cuerpo" id="lista"></div>
+  </div>
+</div>
+
+<main id="vista" class="vista" hidden></main>
+
+<nav class="nav" id="nav">
+  <a href="#/" data-r="mapa"><span data-i="map"></span><small>Mapa</small></a>
+  <a href="#/mis" data-r="mis"><span data-i="car"></span><small>Mis cosas</small><i class="badge" id="bMis"></i></a>
+  <a href="#/publicar" data-r="publicar" class="nav-mas"><span data-i="plus"></span><small>Publicar</small></a>
+  <a href="#/chat" data-r="chat"><span data-i="chat"></span><small>Chat</small><i class="badge" id="bChat"></i></a>
+  <a href="#/cuenta" data-r="cuenta"><span data-i="user"></span><small>Cuenta</small></a>
+</nav>
+
+<div id="modal" class="modal" hidden><div class="modal-caja" role="dialog" aria-modal="true"><button class="icon-btn modal-x" type="button" aria-label="Cerrar"><span data-i="x"></span></button><div id="modalCuerpo"></div></div></div>
+<div id="toast" role="status"></div>
+
+<script src="js/config.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/leaflet.markercluster.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="js/base.js"></script>
+<script src="js/mapa.js"></script>
+<script src="js/app.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>
