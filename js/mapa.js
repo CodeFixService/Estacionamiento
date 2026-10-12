@@ -7,8 +7,17 @@
   const F = { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false };
   try { Object.assign(F, JSON.parse(localStorage.getItem('est:filtros')) || {}); } catch (e) { /* nada */ }
 
+  // Mapa gratis y sin API key. Si CARTO no responde, cambia solo a OpenStreetMap.
   function teselas(m) {
-    return L.tileLayer(g.U.oscuro() ? cfg.TILES_OSCURO : cfg.TILES, { maxZoom: 19, subdomains: 'abcd', attribution: cfg.ATRIBUCION, detectRetina: true }).addTo(m);
+    const c = L.tileLayer(g.U.oscuro() ? cfg.TILES_OSCURO : cfg.TILES, { maxZoom: 19, subdomains: 'abcd', attribution: cfg.ATRIBUCION, detectRetina: true }).addTo(m);
+    let errores = 0, cargo = false;
+    c.on('tileload', () => { cargo = true; });
+    c.on('tileerror', () => {
+      if (cargo || ++errores < 4) return;
+      c.off('tileerror'); m.removeLayer(c);
+      L.tileLayer(cfg.TILES_RESPALDO, { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(m);
+    });
+    return c;
   }
 
   /* ---------- Geocodificación (OpenStreetMap / Nominatim) ---------- */
