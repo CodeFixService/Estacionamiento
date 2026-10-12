@@ -6,12 +6,10 @@ window.EST_CONFIG = {
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'Estaciona',
   AUTOR: 'CodeFix · Josué Castillo',
-  VERSION: '1.0.1',
-  // Mapa: Santiago por defecto. Teselas de CARTO (sobre OpenStreetMap).
+  VERSION: '1.0.2',
+  // Mapa: Santiago por defecto. Teselas de OpenStreetMap: gratis y sin API key.
   CENTRO: [-33.4489, -70.6693],
   ZOOM: 12,
-  TILES: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-  TILES_OSCURO: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  TILES_RESPALDO: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  ATRIBUCION: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  TILES: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  ATRIBUCION: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 };

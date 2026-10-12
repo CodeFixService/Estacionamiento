@@ -296,3 +296,4 @@ input[type=color] { padding: 2px; height: 44px; width: 64px; }
 .tabla td:not(:first-child), .tabla th:not(:first-child) { text-align: center; }
 code.key { font: 700 15px ui-monospace, monospace; letter-spacing: .05em; }
 .leaflet-container .pop a.btn { color: var(--brand-ink); }
+.tiles-oscuro { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6); }
