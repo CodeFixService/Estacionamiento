@@ -39,19 +39,30 @@
     });
   }
   function raster(m) {
-    return L.tileLayer(cfg.TILES, { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      className: 'tiles-gris' + (g.U.oscuro() ? ' tiles-oscuro' : '') }).addTo(m);
+    return L.tileLayer(cfg.TILES, { maxZoom: 19, className: 'tiles-gris' + (g.U.oscuro() ? ' tiles-oscuro' : '') }).addTo(m);
   }
+  // Intenta el mapa vectorial limpio; si no dibuja nada en 8 s (o falla), usa OpenStreetMap en gris.
   function teselas(m) {
-    if (!g.maplibregl || !L.maplibreGL) return raster(m);
-    let capa;
-    try {
-      capa = L.maplibreGL({ style: { version: 8, sources: {}, layers: [{ id: 'fondo', type: 'background', paint: { 'background-color': g.U.oscuro() ? '#0b0f19' : '#ffffff' } }] },
-        attribution: cfg.ATRIBUCION, interactive: false }).addTo(m);
-    } catch (e) { if (capa) m.removeLayer(capa); return raster(m); }
-    if (m.attributionControl) m.attributionControl.addAttribution(cfg.ATRIBUCION);
-    estiloLimpio().then((st) => capa.getMaplibreMap().setStyle(st)).catch(() => { m.removeLayer(capa); raster(m); });
-    return capa;
+    const ref = { capa: null };
+    const respaldo = () => { if (ref.capa === 'raster' || !m.getContainer().isConnected) return; if (ref.capa) { try { m.removeLayer(ref.capa); } catch (e) { /* nada */ } } ref.capa = 'raster'; raster(m); };
+    if (!g.maplibregl || !L.maplibreGL) { respaldo(); return ref; }
+    const reloj = setTimeout(respaldo, 8000);
+    estiloLimpio().then((st) => {
+      if (ref.capa === 'raster' || !m.getContainer().isConnected) return;
+      ref.capa = L.maplibreGL({ style: st, interactive: false }).addTo(m);
+      const gl = ref.capa.getMaplibreMap();
+      gl.on('error', (e) => { if (e && e.error && /Failed to fetch|NetworkError|Load failed/i.test(String(e.error.message))) { clearTimeout(reloj); respaldo(); } });
+      gl.once('idle', () => { clearTimeout(reloj); if (!gl.queryRenderedFeatures().length) respaldo(); });
+    }).catch(() => { clearTimeout(reloj); respaldo(); });
+    return ref;
+  }
+  // Créditos del mapa (obligatorios por licencia) en un botón chico "ⓘ".
+  function creditos(m) {
+    m.attributionControl.setPrefix(false);
+    m.attributionControl.addAttribution(cfg.ATRIBUCION);
+    const el = m.attributionControl.getContainer();
+    el.classList.add('creditos');
+    el.onclick = (e) => { if (e.target.tagName !== 'A') el.classList.toggle('abierto'); };
   }
 
   /* ---------- Geocodificación (OpenStreetMap / Nominatim) ---------- */
@@ -195,6 +206,7 @@
     try { vista = JSON.parse(sessionStorage.getItem('est:vista')); } catch (e) { /* nada */ }
     mapa = L.map('mapa', { maxZoom: 19, zoomControl: false, attributionControl: true, minZoom: 5 }).setView(vista ? vista.c : cfg.CENTRO, vista ? vista.z : cfg.ZOOM);
     capa = teselas(mapa);
+    creditos(mapa);
     grupo = L.markerClusterGroup({ maxClusterRadius: 45, showCoverageOnHover: false, spiderfyOnMaxZoom: true, disableClusteringAtZoom: 16 });
     mapa.addLayer(grupo);
     let t;
@@ -202,7 +214,7 @@
       clearTimeout(t); t = setTimeout(() => cargar(false), 300);
       try { sessionStorage.setItem('est:vista', JSON.stringify({ c: mapa.getCenter(), z: mapa.getZoom() })); } catch (e) { /* nada */ }
     });
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { mapa.removeLayer(capa); capa = teselas(mapa); });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => location.reload());
     $('btnCerca').onclick = () => cercaDeMi(false);
     $('btnFiltros').onclick = abrirFiltros;
     $('btnLista').onclick = () => { $('hojaLista').hidden = false; lista(); };
