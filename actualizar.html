@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Actualizando Estaciona</title>
+<style>body{font:18px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#0b1020;color:#fff;text-align:center}</style>
+</head><body><div><div style="font-size:48px">🔄</div><p id="t">Actualizando Estaciona…</p></div>
+<script>
+// Borra la versión guardada en el celular (caché y service worker) y abre la última versión.
+(async function () {
+  try {
+    if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); }
+    if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); }
+  } catch (e) { /* nada */ }
+  document.getElementById('t').textContent = '¡Listo! Abriendo la versión nueva…';
+  setTimeout(() => location.replace('./?v=' + Date.now()), 800);
+})();
+</script></body></html>
