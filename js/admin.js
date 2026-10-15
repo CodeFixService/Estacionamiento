@@ -22,6 +22,7 @@
     tab = tab || 'resumen';
     const C = marco(tab, pendientes);
     try { await (VISTAS[tab] || VISTAS.resumen)(C); U.ponerIconos(C); } catch (e) { err(C, e); }
+    U.centrarSeg(V);
   }
 
   const VISTAS = {
@@ -261,7 +262,7 @@
       const a = await Api.rpc('admin_config');
       const SUBS = [['precios', '💳 Precios y links'], ['planes', '⭐ Planes'], ['reglas', '⏱️ Reglas'], ['textos', '📝 Textos'], ['push', '🔔 Notificaciones'], ['mant', '🧹 Mantención']];
       const nav = '<div class="seg">' + SUBS.map((t) => '<button data-s="' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>';
-      const ir = (s) => VISTAS.ajustes(C, s).then(() => U.ponerIconos(C));
+      const ir = (s) => VISTAS.ajustes(C, s).then(() => { U.ponerIconos(C); U.centrarSeg(C); });
       let html = '';
       if (sub === 'precios') {
         html = '<p class="small muted">Links de pago del Premium (te pagan a ti). Hay 2 espacios: el <b>activo</b> define el precio que ve todo el mundo.</p>' +

@@ -283,6 +283,7 @@
       '<div class="seg" style="margin-top:14px">' + FILTROS.map((t) => '<a href="#/reservas/' + t[0] + '" class="' + (t[0] === f ? 'on' : '') + '">' + t[1] + ' <small>' + filtrar(l, t[0]).length + '</small></a>').join('') + '</div>' +
       (lista.length ? lista.map(tarjetaArriendo).join('') : '<div class="vacio">' + ico('car') + '<p>' + (f === 'mias' ? 'Aún no arriendas. Busca en el mapa y reserva.' : 'Nada por aquí.') + '</p>' + (f === 'mias' ? '<a class="btn" href="#/">Ir al mapa</a>' : '') + '</div>');
     U.ponerIconos($('rsC'));
+    U.centrarSeg($('rsC'));
   }
   async function contactar(uid) {
     try { const id = await Api.rpc('abrir_conversacion', { p_con: uid }); location.hash = '#/chat/' + id; } catch (e) { fallo(e); }
@@ -454,6 +455,7 @@
     sub = sub || 'cuenta';
     V.innerHTML = '<div class="seg">' + SUBS.map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
     const T = $('masC');
+    U.centrarSeg(V);
     try {
       if (sub === 'perfil') return vEditarPerfil(T);
       if (sub === 'cuenta') return vCuenta(T);
