@@ -50,3 +50,15 @@ Branch **main** y carpeta **/ (root)** → **Save**. En 1–2 minutos queda en:
 llevas (🟢/🟡/🔴). Las fotos se comprimen a WebP (~120 KB cada una, miniatura ~20 KB), las cédulas se borran
 apenas se revisan, los mensajes a los 30 días, y el botón **🧹 Limpiar ahora** borra fotos que ya no se usan.
 Supabase pausa el proyecto si no hay actividad en 7 días (se reactiva con un clic).
+
+## Actualizar a la versión 2.0
+1. Supabase → **SQL Editor** → pega `supabase/instalar-corto.sql` (o el `instalar.sql` completo) → **Run**. No borra datos.
+2. **Administración → Ajustes**: revisa **Precios y links** (2 espacios, uno activo), **Planes**, **Reglas** y **Textos**.
+3. Cada dueño configura su link en **Más → Links de pago** y su WhatsApp en **Más → Perfil**.
+
+### Cómo funciona una reserva
+1. El cliente elige modalidad (hora, día o mes), desde cuándo y cuánto tiempo → queda **apartado** N minutos.
+2. Paga con el link activo del dueño (o el abono fijo, si lo puso) y sube la foto del comprobante → **en revisión**.
+3. El dueño aprueba (**confirmada**) o rechaza. Si no se sube el comprobante a tiempo, se **libera sola**.
+4. Cancelar: dentro de N minutos → se devuelve; con H horas o más → **saldo a favor** con ese dueño (se descuenta solo en la
+   próxima reserva); con menos → se pierde. Si cancela el dueño, siempre devuelve. Todo se cambia en **Ajustes → Reglas**.

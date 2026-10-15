@@ -307,3 +307,26 @@ code.key { font: 700 15px ui-monospace, monospace; letter-spacing: .05em; }
 .leaflet-control-attribution.creditos.abierto { font-size: 11px; width: auto; height: auto; padding: 4px 8px; border-radius: 10px; }
 .leaflet-control-attribution.creditos.abierto::before { display: none; }
 .mapa-vista .leaflet-bottom.leaflet-right { bottom: 0; right: 70px; }
+
+/* ---------- v2: línea visual BiciTaller ---------- */
+:root { --r: 18px; --field: #f8fafc; --brand-soft: color-mix(in srgb, var(--brand) 12%, transparent);
+  --shadow-s: 0 1px 2px rgba(15, 23, 42, .05), 0 6px 18px rgba(15, 23, 42, .06); }
+:root[data-theme="dark"] { --field: #0f1520; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --field: #0f1520; } }
+.card { box-shadow: var(--shadow-s); }
+input, select, textarea { background: var(--field); }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 4px var(--brand-soft); }
+.nav a .i { font-size: 22px; line-height: 1; filter: grayscale(.35); }
+.nav a.on .i { filter: none; transform: scale(1.08); }
+.nav a .badge { right: calc(50% - 24px); }
+.seg { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; margin-bottom: 10px; scrollbar-width: none; }
+.seg::-webkit-scrollbar { display: none; }
+.seg a, .seg button { flex: none; padding: 9px 13px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); color: var(--ink);
+  font: 600 14px system-ui; cursor: pointer; white-space: nowrap; text-align: center; line-height: 1.25; }
+.seg a small { color: var(--muted); font-weight: 700; margin-left: 2px; }
+.seg .on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.seg .on small { color: inherit; opacity: .85; }
+.kpi { box-shadow: var(--shadow-s); display: block; }
+.slotpago.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.tabla td:last-child { text-align: right; }
+#rMod button { flex: 1; }
