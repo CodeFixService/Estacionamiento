@@ -893,7 +893,8 @@ insert into public.textos (clave, valor) values
   ('premium_texto', 'Publica más estacionamientos, destaca en el mapa con pin dorado, arrienda sin límites y recibe alertas de zona.'),
   ('pago_instrucciones', 'Toca "Pagar", paga en Mercado Pago, toma una captura del comprobante y súbela aquí. Te avisamos apenas se apruebe.'),
   ('bienvenida', '¡Bienvenido a Estaciona! Verifica tu identidad, completa tu perfil y configura tu link de pago para empezar a arrendar.'),
-  ('aviso_seguridad', 'Nunca pagues fuera de la app sin conocer al dueño. Si algo parece estafa, denúncialo con evidencia.')
+  ('aviso_seguridad', 'Nunca pagues fuera de la app sin conocer al dueño. Si algo parece estafa, denúncialo con evidencia.'),
+  ('version_liberada', '')
 on conflict (clave) do nothing;
 alter table public.textos enable row level security;
 

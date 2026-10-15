@@ -299,9 +299,29 @@
           '<div class="row wrap"><button class="btn sec small" id="ajVapid">' + (a.vapid_public ? 'Regenerar claves' : 'Generar claves push') + '</button><button class="btn sec small" id="ajPing">Probar función "enviar"</button><button class="btn sec small" id="ajYo">Prueba: aviso solo a mí</button></div></div>';
       } else {
         html = '<div class="card"><h3 style="margin-top:0">🧹 Mantención</h3><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">Limpiar ahora</button></div>' +
+          '<div class="card" id="mVer"><h3 style="margin-top:0">🔄 Versiones de la app</h3><p class="small">Cargando…</p></div>' +
           '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><p class="small">Versión instalada: <b>' + esc(String((await Api.ajustes(true)).version_bd || '?')) + '</b> · esperada por la app: <b>' + BD + '</b></p></div>';
       }
       C.innerHTML = nav + html;
+      if ($('mVer')) {
+        let pub = '?';
+        try { pub = String((await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version); } catch (e) { /* sin red */ }
+        const lib = a.textos.version_liberada || '—', cfg = g.EST_CONFIG;
+        $('mVer').innerHTML = '<h3 style="margin-top:0">🔄 Versiones de la app</h3><table class="tabla"><tr><td>Publicada (GitHub)</td><td><b>' + esc(pub) + '</b></td></tr>' +
+          '<tr><td>La que usas tú</td><td>' + esc(cfg.VERSION) + '</td></tr><tr><td>Liberada a todos</td><td>' + esc(lib) + '</td></tr></table>' +
+          '<p class="small muted">1) Actualiza tú y prueba. 2) Toca <b>Liberar</b>: a todos les aparece "Hay una versión nueva → Actualizar ahora" y les llega un aviso push.</p>' +
+          '<div class="row wrap"><button class="btn sec small" id="vMia">Actualizar la mía</button><button class="btn small" id="vLib"' + (pub === '?' || pub === lib ? ' disabled' : '') + '>🚀 Liberar v' + esc(pub) + ' a todos</button></div>';
+        $('vMia').onclick = (e) => g.App.actualizarAhora(e.target);
+        $('vLib').onclick = async () => {
+          if (!await confirmar('¿Liberar la versión ' + pub + ' a todos y avisarles?', 'Liberar')) return;
+          try {
+            await Api.rpc('admin_guardar_textos', { p: { version_liberada: pub } });
+            const n = await Api.rpc('admin_aviso', { p_titulo: '🔄 Nueva versión ' + pub, p_cuerpo: 'Abre Estaciona y toca "Actualizar ahora".' });
+            for (let i = 0; i < Math.ceil(n / 300); i++) await Api.funcion('push').catch(() => {});
+            toast('Versión ' + pub + ' liberada · aviso a ' + n + ' usuarios'); ir('mant');
+          } catch (er) { toast(er.message); }
+        };
+      }
       C.onclick = async (e) => {
         const t = e.target.closest('[data-s]'); if (t) return ir(t.dataset.s);
         const al = e.target.closest('.alOk');

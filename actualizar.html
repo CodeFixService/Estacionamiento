@@ -6,10 +6,11 @@
 <script>
 // Borra la versión guardada en el celular (caché y service worker) y abre la última versión.
 (async function () {
-  try {
-    if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); }
-    if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); }
-  } catch (e) { /* nada */ }
+  const limpiar = (async () => {
+    try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); } } catch (e) { /* nada */ }
+    try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch (e) { /* nada */ }
+  })();
+  await Promise.race([limpiar, new Promise((ok) => setTimeout(ok, 2500))]);
   document.getElementById('t').textContent = '¡Listo! Abriendo la versión nueva…';
   setTimeout(() => location.replace('./?v=' + Date.now()), 800);
 })();

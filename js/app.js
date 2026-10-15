@@ -906,22 +906,27 @@
 
   // Actualizaciones: compara version.json con la versión instalada y muestra "Hay una versión nueva → Actualizar ahora".
   let swReg = null;
+  const mayor = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
   async function actualizarAhora(btn) {
     if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
-    try {
-      if (swReg) { await swReg.update(); if (swReg.waiting) { swReg.waiting.postMessage('saltar'); setTimeout(() => location.reload(), 4000); return; } }
-      const ks = await caches.keys();
-      await Promise.all(ks.filter((k) => k !== 'est-fotos').map((k) => caches.delete(k)));
-    } catch (e) { /* sin caché */ }
-    location.reload();
+    const limpiar = (async () => {
+      try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); } catch (e) { /* nada */ }
+      try { const ks = await caches.keys(); await Promise.all(ks.filter((k) => k !== 'est-fotos').map((k) => caches.delete(k))); } catch (e) { /* nada */ }
+    })();
+    await Promise.race([limpiar, new Promise((ok) => setTimeout(ok, 2500))]);
+    location.replace(location.pathname + '?v=' + Date.now() + location.hash);
   }
   async function buscarVersion(manual) {
     let v = '';
     try { v = String((await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { if (manual) toast('Sin conexión'); return; }
-    if (!v || v === cfg.VERSION) { if (manual) toast('Ya tienes la última versión (v' + cfg.VERSION + ') ✅'); return; }
+    // El admin ve la versión nueva apenas se publica (para probarla); el resto, cuando el admin la libera.
+    const lib = ((await Api.ajustes(true)).textos || {}).version_liberada || '';
+    const nueva = v && mayor(v, cfg.VERSION) && (Api.admin() || (lib && !mayor(v, lib)));
+    if (!nueva) { if (manual) toast('Ya tienes la última versión (v' + cfg.VERSION + ') ✅'); return; }
     if (document.getElementById('upd')) return;
     const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
-    d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><small>Tienes la v' + esc(cfg.VERSION) + ' · nueva v' + esc(v) + '</small></div><button class="btn small">Actualizar ahora</button>';
+    d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><small>Tienes la v' + esc(cfg.VERSION) + ' · nueva v' + esc(v) + (Api.admin() && lib !== v ? ' (solo tú: pruébala y libérala en Admin → Ajustes → Mantención)' : '') + '</small></div><button class="btn small">Actualizar ahora</button>';
     d.querySelector('button').onclick = (e) => actualizarAhora(e.target);
     document.body.appendChild(d);
   }
@@ -963,6 +968,6 @@
       if (rutaActual && !/^\/?$/.test(rutaActual)) router();
     }
   }
-  g.App = { router, contadores, fallo, pedirLogin, denunciar, MODAL, ESTADO_EST, precioTxt, planTxt };
+  g.App = { actualizarAhora, mayor, router, contadores, fallo, pedirLogin, denunciar, MODAL, ESTADO_EST, precioTxt, planTxt };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar); else iniciar();
 })(window);
