@@ -650,6 +650,7 @@
       '<div class="sec-tit">Ajustes</div><div class="card stack">' +
       '<div class="row between"><span>' + ico('bell') + ' Notificaciones en este celular</span><button class="btn small sec" id="cPush">Activar</button></div>' +
       '<div class="row between"><span>🌓 Apariencia</span><select id="cTema" style="width:auto"><option value="">Automática</option><option value="light">Clara</option><option value="dark">Oscura</option></select></div>' +
+      '<div class="row between"><span>🔄 Versión ' + esc(cfg.VERSION) + '</span><button class="btn small sec" id="cAct">Buscar actualización</button></div>' +
       '<div class="row between" id="cInstWrap" hidden><span>' + ico('download') + ' Instalar la app</span><button class="btn small" id="cInst">Instalar</button></div></div>' +
       '<div class="sec-tit">Ayuda</div><div class="card stack"><a href="#/chat" id="cSop" class="row" style="color:var(--ink)">' + ico('help') + ' Soporte (chat)</a>' +
       '<a href="#/legal" class="row" style="color:var(--ink)">' + ico('shield') + ' Términos y privacidad</a>' +
@@ -658,6 +659,7 @@
       '<p class="pie">© ' + new Date().getFullYear() + ' ' + esc(cfg.MARCA) + ' · ' + esc(cfg.AUTOR) + '<br>Versión ' + esc(cfg.VERSION) + '</p>';
     U.ponerIconos(T);
     $('cTema').value = tema;
+    $('cAct').onclick = () => buscarVersion(true);
     $('cTema').onchange = (e) => { U.aplicarTema(e.target.value); location.reload(); };
     $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', U.enlace('#/u/' + a.id), Api.puede('qr_color') ? a.color : '#000');
     if (a.alerta) $('aKm').value = String(a.alerta.km);
@@ -900,25 +902,35 @@
   window.addEventListener('hashchange', router);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) contadores(); });
 
+  // Actualizaciones: compara version.json con la versión instalada y muestra "Hay una versión nueva → Actualizar ahora".
+  let swReg = null;
+  async function actualizarAhora(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
+    try {
+      if (swReg) { await swReg.update(); if (swReg.waiting) { swReg.waiting.postMessage('saltar'); setTimeout(() => location.reload(), 4000); return; } }
+      const ks = await caches.keys();
+      await Promise.all(ks.filter((k) => k !== 'est-fotos').map((k) => caches.delete(k)));
+    } catch (e) { /* sin caché */ }
+    location.reload();
+  }
+  async function buscarVersion(manual) {
+    let v = '';
+    try { v = String((await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { if (manual) toast('Sin conexión'); return; }
+    if (!v || v === cfg.VERSION) { if (manual) toast('Ya tienes la última versión (v' + cfg.VERSION + ') ✅'); return; }
+    if (document.getElementById('upd')) return;
+    const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
+    d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><small>Tienes la v' + esc(cfg.VERSION) + ' · nueva v' + esc(v) + '</small></div><button class="btn small">Actualizar ahora</button>';
+    d.querySelector('button').onclick = (e) => actualizarAhora(e.target);
+    document.body.appendChild(d);
+  }
   function registrarSW() {
-    if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
-    navigator.serviceWorker.register('sw.js').then((reg) => {
-      const avisar = (w) => {
-        if (document.getElementById('upd')) return;
-        const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
-        d.innerHTML = '<div class="grow"><b>🔄 Nueva versión disponible</b></div><button class="btn small">Actualizar</button>';
-        d.querySelector('button').onclick = () => w.postMessage('saltar');
-        document.body.appendChild(d);
-      };
-      if (reg.waiting && navigator.serviceWorker.controller) avisar(reg.waiting);
-      reg.addEventListener('updatefound', () => {
-        const w = reg.installing;
-        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) avisar(w); });
-      });
-      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
-    }).catch(() => {});
+    if (!('serviceWorker' in navigator) || location.protocol === 'file:') { buscarVersion(); return; }
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => { swReg = reg; reg.update().catch(() => {}); }).catch(() => {});
     let recargado = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!recargado) { recargado = true; location.reload(); } });
+    buscarVersion();
+    setInterval(buscarVersion, 10 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) buscarVersion(); });
   }
 
   async function iniciar() {
