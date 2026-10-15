@@ -21,6 +21,12 @@
   }
   const fecha = (f) => f ? new Date(f).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const hora = (f) => new Date(f).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+  const fh = (f) => f ? new Date(f).toLocaleString('es-CL', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  // "quedan 12:34" hasta una fecha (para la reserva retenida).
+  function quedan(f) {
+    const s = Math.max(0, Math.floor((new Date(f) - Date.now()) / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
 
   /* ---------- Íconos (estilo Lucide, ISC) ---------- */
   const I = {
@@ -270,6 +276,21 @@
     logueado: () => !!cuenta,
     premium: () => !!(cuenta && cuenta.premium),
     admin: () => !!(cuenta && cuenta.admin),
+    // Funciones del plan actual (editable por el admin en Ajustes → Planes).
+    puede: (k) => !!(cuenta && (cuenta.admin || (cuenta.plan && cuenta.plan[k]))),
+    _aj: null,
+    async ajustes(forzar) {
+      if (this._aj && !forzar) return this._aj;
+      try { this._aj = await rpc('ajustes_publicos') || {}; try { localStorage.setItem('est:aj', JSON.stringify(this._aj)); } catch (e) { /* nada */ } }
+      catch (e) { try { this._aj = JSON.parse(localStorage.getItem('est:aj')) || {}; } catch (e2) { this._aj = {}; } }
+      return this._aj;
+    },
+    // Texto editable con variables {minutos}, {devolucion}, {horas}, {dias}.
+    texto(clave, def) {
+      const aj = this._aj || {}, r = aj.reglas || {};
+      return String(((aj.textos || {})[clave]) || def || '').replace(/\{minutos\}/g, r.minutos_pago).replace(/\{devolucion\}/g, r.minutos_devolucion)
+        .replace(/\{horas\}/g, r.horas_cancelacion).replace(/\{dias\}/g, r.dias_saldo);
+    },
     async refrescar() {
       const { data } = await sb.auth.getSession();
       if (!data.session) { this.guardar(null); return null; }
@@ -345,7 +366,7 @@
   }
 
   g.U = {
-    $, esc, clp, corto, hace, fecha, hora, ico, ponerIconos, sello, toast, modal, cerrarModal, confirmar, pedirTexto, amable,
+    $, esc, clp, corto, hace, fecha, hora, fh, quedan, ico, ponerIconos, sello, toast, modal, cerrarModal, confirmar, pedirTexto, amable,
     subirFoto, urlFoto, urlMini, urlPrivada, imgMini, avatar, nombreCon, estrellas, rutValido, rutFormato, qrCanvas, mostrarQR,
     enlace, compartir, aplicarColor, aplicarTema, oscuro, activarPush, pushActivo, pushOk, sincronizarPush
   };

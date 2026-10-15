@@ -1,5 +1,9 @@
 # 🅿️ Estaciona
 
+> **Versión 2.0** (modelo BiciTaller): ubicación exacta, reservas con tiempo retenido + link de pago + comprobante,
+> cancelación con devolución / saldo a favor / pérdida, 2 links de pago por persona, planes, reglas y textos editables
+> desde el panel, pagos de Premium con comprobante, estadísticas y menú Mapa · Reservas · Publicar · Chat · Más.
+
 App web instalable (PWA) para **arrendar y publicar estacionamientos en Santiago**, con personas verificadas,
 mapa interactivo y chat seguro. © CodeFix · Josué Castillo.
 

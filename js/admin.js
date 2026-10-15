@@ -6,6 +6,7 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
+  const BD = 2; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   function marco(tab, pend) {
@@ -32,17 +33,20 @@
       const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
       const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
-      C.innerHTML = ((r.pend_verif || r.pend_denuncias || r.pend_pagos) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
+      C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '. Vuelve a ejecutar <b>instalar.sql</b> en Supabase.</div>' : '') +
+        ((r.pend_verif || r.pend_denuncias || r.pend_pagos) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
         r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>', r.pend_pagos && '<a href="#/admin/pagos">💳 ' + r.pend_pagos + ' aviso(s) de pago</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
         '<div class="kpis" style="margin-top:12px">' + [['Usuarios', r.usuarios], ['Nuevos (7 días)', r.nuevos7], ['Activos (7 días)', r.activos7], ['Verificados', r.verificados],
           ['Premium pagados', r.premium], ['En prueba 7 días', r.prueba], ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles],
-          ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total], ['Keys sin usar', r.keys_libres], ['Suspendidos', r.suspendidos]]
+          ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total], ['Ingresos del mes', clp(r.ingresos_mes)], ['Por vencer (7 días)', r.por_vencer],
+          ['Reservas en revisión', r.reservas_revision], ['Keys sin usar', r.keys_libres], ['Suspendidos', r.suspendidos]]
           .map((k) => '<div class="kpi"><b>' + k[1] + '</b><small>' + k[0] + '</small></div>').join('') + '</div>' +
         '<div class="sec-tit">' + ico('server') + ' Estado del servidor (Supabase gratis)</div><div class="card">' +
         '<div class="row between small"><b>Base de datos</b><span>' + sem(pDb) + ' · ' + mb(s.db) + ' de ' + mb(s.db_lim) + '</span></div><div class="barra"><i class="' + col(pDb) + '" style="width:' + Math.max(1, pDb) + '%"></i></div>' +
         '<div class="row between small" style="margin-top:12px"><b>Fotos y archivos</b><span>' + sem(pSt) + ' · ' + mb(s.fotos + s.privado) + ' de ' + mb(s.st_lim) + '</span></div><div class="barra"><i class="' + col(pSt) + '" style="width:' + Math.max(1, pSt) + '%"></i></div>' +
         '<p class="small muted">' + s.archivos + ' archivos · ' + s.mensajes + ' mensajes guardados · ' + s.por_borrar + ' archivos por borrar. Los mensajes se borran solos a los 30 días y las fotos se guardan comprimidas (WebP).</p>' +
-        '<button class="btn sec small" id="aLimpiar">🧹 Limpiar ahora</button></div>' +
+        '<button class="btn sec small" id="aLimpiar">🧹 Limpiar ahora</button>' +
+        '<details style="margin-top:10px"><summary class="small">Tamaño por tabla</summary><table class="tabla">' + (r.tablas || []).map((t) => '<tr><td>' + esc(t.t) + '</td><td>' + t.n + ' filas</td><td>' + mb(t.b) + '</td></tr>').join('') + '</table></details></div>' +
         '<div class="sec-tit">Registros últimos 14 días</div><div class="card"><div class="barras">' + r.registros.map((x) => '<div title="' + esc(x.d) + ': ' + x.n + '" style="height:' + (x.n / maxR * 100) + '%"></div>').join('') + '</div></div>' +
         '<div class="sec-tit">Comunas con más estacionamientos</div><div class="card">' + (r.comunas.length ? r.comunas.map((c) => '<div class="row between"><span>' + esc(c.c) + '</span><b>' + c.n + '</b></div>').join('') : '<span class="muted">Aún no hay</span>') + '</div>' +
         '<div class="sec-tit">Compartir la app</div><div class="card center"><div class="qr-caja" id="aQR"></div><p class="small" style="word-break:break-all">' + esc(U.enlace('')) + '</p>' +
@@ -116,21 +120,30 @@
       };
     },
 
-    async pagos(C) {
-      const r = await Api.rpc('admin_pagos');
-      C.innerHTML = '<p class="small muted">Personas que avisaron que pagaron. Revisa tu cuenta de pagos y aprueba: se les activa Premium automáticamente.</p>' +
-        (r.length ? r.map((p) => '<div class="card" style="margin-top:10px" data-id="' + p.id + '"><div class="row">' + avatar(p.usuario) + '<div class="grow"><b>' + esc(p.usuario.nombre) + '</b><div class="small muted">' + esc(p.email) + ' · ' + hace(p.creado) + '</div></div></div>' +
+    async pagos(C, estado) {
+      estado = estado || 'pendiente';
+      const r = await Api.rpc('admin_pagos', { p_estado: estado });
+      C.innerHTML = '<div class="seg">' + [['pendiente', '🧾 Por revisar'], ['aprobado', '✅ Aprobados'], ['rechazado', '❌ Rechazados']].map((t) => '<button data-e="' + t[0] + '" class="' + (t[0] === estado ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>' +
+        (r.length ? r.map((p) => '<div class="card" style="margin-top:10px" data-id="' + p.id + '"><div class="row">' + avatar(p.usuario) + '<div class="grow"><b>' + esc(p.usuario.nombre) + '</b><div class="small muted">' + esc(p.email) + ' · ' + hace(p.creado) + '</div></div><b>' + clp(p.monto) + '</b></div>' +
           (p.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px">' + esc(p.nota) + '</p>' : '') +
-          '<div class="row" style="margin-top:10px"><button class="btn ok grow" data-ap="1">Aprobar Premium</button><button class="btn line grow" data-ap="0">No encontré el pago</button></div></div>').join('')
-          : '<div class="vacio">💳<p>No hay avisos de pago pendientes</p></div>');
+          (p.comprobante ? '<img class="ver-img" data-priv="' + esc(p.comprobante) + '" alt="Comprobante" style="margin-top:8px"><a class="btn sec small" style="margin-top:6px" data-desc="' + esc(p.comprobante) + '">' + ico('download') + ' Descargar</a>' : '<p class="small muted">Sin comprobante (o ya se borró)</p>') +
+          (p.motivo ? '<p class="small"><b>Motivo:</b> ' + esc(p.motivo) + '</p>' : '') +
+          (estado === 'pendiente' ? '<div class="row" style="margin-top:10px"><button class="btn ok grow" data-ap="1">✅ Aprobar Premium</button><button class="btn line grow" data-ap="0">Rechazar</button></div>' : '') + '</div>').join('')
+          : '<div class="vacio">💳<p>No hay pagos aquí</p></div>');
+      C.querySelectorAll('[data-priv]').forEach(async (img) => { img.src = await U.urlPrivada(img.dataset.priv); img.onclick = () => window.open(img.src, '_blank'); });
       C.onclick = async (e) => {
+        const t = e.target.closest('[data-e]'); if (t) { VISTAS.pagos(C, t.dataset.e).then(() => U.ponerIconos(C)); return; }
+        const d = e.target.closest('[data-desc]');
+        if (d) { const u = await U.urlPrivada(d.dataset.desc); const a = document.createElement('a'); a.href = u; a.download = 'comprobante'; a.target = '_blank'; a.click(); return; }
         const b = e.target.closest('[data-ap]'); if (!b) return;
-        try { await Api.rpc('admin_resolver_pago', { p_id: b.closest('[data-id]').dataset.id, p_aprobar: b.dataset.ap === '1' }); Api.empujar(); toast('Listo'); vista('pagos'); } catch (er) { toast(er.message); }
+        let motivo = null;
+        if (b.dataset.ap === '0') { motivo = await U.pedirTexto('Motivo del rechazo', 'Ej: no encontré el pago en mi cuenta', 'Rechazar'); if (motivo == null) return; }
+        try { await Api.rpc('admin_resolver_pago', { p_id: b.closest('[data-id]').dataset.id, p_aprobar: b.dataset.ap === '1', p_motivo: motivo }); Api.empujar(); toast('Listo'); vista('pagos'); } catch (er) { toast(er.message); }
       };
     },
 
     async usuarios(C) {
-      C.innerHTML = '<div class="row"><input id="uQ" placeholder="Buscar por nombre, correo o RUT" class="grow"><select id="uF" style="width:auto"><option value="">Todos</option><option value="premium">Premium</option><option value="gratis">Gratis</option>' +
+      C.innerHTML = '<div class="row"><input id="uQ" placeholder="Buscar por nombre, correo o RUT" class="grow"><select id="uF" style="width:auto"><option value="">Todos</option><option value="premium">Premium</option><option value="gratis">Gratis</option><option value="por_vencer">Por vencer (7 días)</option><option value="inactivos">Inactivos (30 días)</option>' +
         '<option value="verificados">Verificados</option><option value="sin_verificar">Sin verificar</option><option value="suspendidos">Suspendidos</option></select></div><div id="uL"><div class="spin"></div></div><button class="btn line block" id="uMas" hidden style="margin-top:10px">Ver más</button>';
       let off = 0, t;
       const cargar = async (mas) => {
@@ -140,7 +153,7 @@
           '<div class="small muted ell">' + esc(u.email) + (u.rut && u.rut[0] !== 'X' ? ' · RUT ' + esc(U.rutFormato(u.rut)) : '') + '</div>' +
           '<div class="small">' + (u.admin ? 'Administrador' : u.premium ? '⭐ ' + (u.plan_origen === 'prueba' ? 'Prueba' : 'Premium') + (u.premium_hasta && !/infinity/i.test(String(u.premium_hasta)) ? ' hasta ' + fecha(u.premium_hasta) : ' de por vida') : 'Gratis') +
           ' · ' + u.publicados + ' publicados' + (u.denuncias ? ' · <b style="color:var(--bad)">' + u.denuncias + ' denuncias</b>' : '') + ' · registro ' + fecha(u.creado) + '</div></div></div>' +
-          (u.admin ? '' : '<div class="row wrap" style="margin-top:10px"><select data-prem class="grow" style="width:auto"><option value="">⭐ Premium…</option><option value="1">+1 mes</option><option value="3">+3 meses</option><option value="12">+12 meses</option><option value="0">De por vida</option><option value="-1">Quitar Premium</option></select>' +
+          (u.admin ? '' : '<div class="row wrap" style="margin-top:10px"><select data-prem class="grow" style="width:auto"><option value="">⭐ Premium…</option><option value="7">+7 días</option><option value="30">+30 días</option><option value="90">+90 días</option><option value="365">+365 días</option><option value="0">De por vida</option><option value="-1">Quitar Premium</option></select>' +
             '<button class="btn sec small" data-a="chat">' + ico('chat') + '</button><a class="btn sec small" href="#/u/' + u.id + '">' + ico('eye') + '</a>' +
             '<button class="btn ' + (u.suspendido ? 'ok' : 'sec') + ' small" data-a="susp" data-s="' + (u.suspendido ? 0 : 1) + '">' + (u.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
             '<button class="btn line small" data-a="borrar" style="color:var(--bad)">' + ico('trash') + '</button></div>') + '</div>').join('');
@@ -154,7 +167,7 @@
       $('uL').onchange = async (e) => {
         const s = e.target.closest('[data-prem]'); if (!s || s.value === '') return;
         const card = s.closest('[data-id]');
-        try { await Api.rpc('admin_premium', { p_id: card.dataset.id, p_meses: +s.value }); Api.empujar(); toast('Plan actualizado'); cargar(false); } catch (er) { toast(er.message); }
+        try { await Api.rpc('admin_premium', { p_id: card.dataset.id, p_dias: +s.value }); Api.empujar(); toast('Plan actualizado'); cargar(false); } catch (er) { toast(er.message); }
       };
       $('uL').onclick = async (e) => {
         const b = e.target.closest('[data-a]'); if (!b) return;
@@ -243,37 +256,101 @@
       };
     },
 
-    async ajustes(C) {
-      const a = await Api.rpc('admin_ajustes');
-      C.innerHTML = '<div class="card"><h3>💳 Venta de Premium</h3><label>Precio (CLP)</label><input id="ajP" type="number" inputmode="numeric" value="' + esc(a.precio || '') + '">' +
-        '<label>Link de pago (Mercado Pago u otro)</label><input id="ajL" type="url" placeholder="https://…" value="' + esc(a.link_pago || '') + '">' +
-        '<label>Premium que entrega cada pago aprobado</label><select id="ajM"><option value="1">1 mes</option><option value="3">3 meses</option><option value="6">6 meses</option><option value="12">12 meses</option><option value="0">De por vida</option></select>' +
-        '<button class="btn block" id="ajOk" style="margin-top:12px">Guardar</button></div>' +
-        '<div class="card"><h3>🔔 Notificaciones push</h3><p class="small muted">' + (a.vapid_public && a.vapid_private ? '✅ Claves configuradas.' : 'Genera las claves una sola vez para enviar notificaciones al celular.') + '</p>' +
-        '<div class="row wrap"><button class="btn sec small" id="ajVapid">' + (a.vapid_public ? 'Regenerar claves' : 'Generar claves push') + '</button><button class="btn sec small" id="ajPing">Probar función "enviar"</button><button class="btn sec small" id="ajYo">Prueba: aviso solo a mí</button></div></div>';
-      $('ajM').value = String(a.meses_por_pago || 1);
-      $('ajOk').onclick = async () => {
-        try { await Api.rpc('admin_guardar_ajustes', { p: { precio: $('ajP').value, link_pago: $('ajL').value.trim(), meses_por_pago: $('ajM').value } }); toast('Guardado'); } catch (e) { toast(e.message); }
-      };
-      $('ajVapid').onclick = async () => {
-        if (a.vapid_public && !await confirmar('Si regeneras las claves, cada persona deberá activar de nuevo las notificaciones. ¿Seguir?', 'Regenerar', true)) return;
-        try {
-          const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-          const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k.publicKey));
-          const pub = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-          const priv = (await crypto.subtle.exportKey('jwk', k.privateKey)).d;
-          await Api.rpc('admin_guardar_ajustes', { p: { vapid_public: pub, vapid_private: priv } });
-          toast('Claves creadas. Activa las notificaciones en Cuenta.'); vista('ajustes');
-        } catch (e) { toast(e.message); }
-      };
-      $('ajPing').onclick = async () => { try { const r = await Api.funcion('ping'); toast('✅ Función "enviar" v' + r.version + (r.servicio ? ' lista' : ' sin clave de servidor')); } catch (e) { toast(e.message); } };
-      $('ajYo').onclick = async () => {
-        try {
-          await U.activarPush();
-          await Api.rpc('admin_prueba_push');
-          const r = await Api.funcion('push');
-          toast('Push enviados: ' + (r.enviados || 0) + (r.error ? ' · ' + r.error : ''));
-        } catch (e) { toast(e.message); }
+    async ajustes(C, sub) {
+      sub = sub || 'precios';
+      const a = await Api.rpc('admin_config');
+      const SUBS = [['precios', '💳 Precios y links'], ['planes', '⭐ Planes'], ['reglas', '⏱️ Reglas'], ['textos', '📝 Textos'], ['push', '🔔 Notificaciones'], ['mant', '🧹 Mantención']];
+      const nav = '<div class="seg">' + SUBS.map((t) => '<button data-s="' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>';
+      const ir = (s) => VISTAS.ajustes(C, s).then(() => U.ponerIconos(C));
+      let html = '';
+      if (sub === 'precios') {
+        html = '<p class="small muted">Links de pago del Premium (te pagan a ti). Hay 2 espacios: el <b>activo</b> define el precio que ve todo el mundo.</p>' +
+          a.links.map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '"><div class="row between"><b>Espacio ' + s.slot + '</b><label class="check" style="margin:0"><input type="radio" name="alAct"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
+            '<label>Precio (CLP)</label><input class="alM" type="number" inputmode="numeric" min="0" value="' + s.monto + '">' +
+            '<label>Link de pago</label><input class="alU" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
+            '<label>Texto (opcional)</label><input class="alT" maxlength="300" placeholder="Ej: Oferta de lanzamiento" value="' + esc(s.texto) + '">' +
+            '<button class="btn block alOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
+      } else if (sub === 'planes') {
+        const etq = { publicar: 'Estacionamientos publicados', arrendar: 'Arriendos activos a la vez', fotos: 'Fotos por estacionamiento', favoritos: 'Favoritos (500 = ilimitado)',
+          destacado: 'Pin dorado destacado', estadisticas: 'Estadísticas', alertas: 'Alerta de zona', color_libre: 'Color libre (RGB)', qr_color: 'QR con su color' };
+        html = a.planes.map((p) => '<div class="card" data-plan="' + p.codigo + '"><h3 style="margin-top:0">' + (p.codigo === 'premium' ? '⭐ ' : '') + esc(p.nombre) + '</h3>' +
+          '<div class="grid2"><div><label>Nombre</label><input class="plN" value="' + esc(p.nombre) + '"></div><div><label>Duración (días)</label><input class="plD" type="number" min="1" value="' + p.duracion_dias + '"></div></div>' +
+          '<label>Descripción</label><input class="plDe" value="' + esc(p.descripcion) + '">' +
+          '<div class="grid2">' + Object.keys(etq).map((k) => typeof p.limites[k] === 'boolean'
+            ? '<label class="check"><input type="checkbox" data-k="' + k + '"' + (p.limites[k] ? ' checked' : '') + '> ' + etq[k] + '</label>'
+            : '<div><label>' + etq[k] + '</label><input type="number" min="0" data-k="' + k + '" value="' + (p.limites[k] || 0) + '"></div>').join('') + '</div>' +
+          '<label>Beneficios (uno por línea)</label><textarea class="plB">' + esc((p.beneficios || []).join('\n')) + '</textarea>' +
+          '<button class="btn block plOk" style="margin-top:10px">Guardar plan</button></div>').join('');
+      } else if (sub === 'reglas') {
+        const etq = { minutos_pago: 'Minutos para pagar y subir el comprobante (reserva retenida)', minutos_devolucion: 'Minutos para cancelar con devolución',
+          horas_cancelacion: 'Horas de anticipación para saldo a favor', dias_saldo: 'Días que dura el saldo a favor', dias_regalo: 'Días de Premium de regalo al crear una cuenta',
+          dias_aviso_vencimiento: 'Días de aviso antes de que venza el Premium', dias_comprobantes: 'Días antes de borrar los comprobantes', dias_mensajes: 'Días antes de borrar los mensajes',
+          mensajes_seguidos: 'Mensajes seguidos sin respuesta', mensajes_dia: 'Mensajes por día por persona' };
+        html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><input type="number" min="0" data-r="' + k + '" value="' + (a.reglas[k] ?? '') + '">').join('') +
+          '<button class="btn block" id="rgOk" style="margin-top:12px">Guardar reglas</button></div>';
+      } else if (sub === 'textos') {
+        const etq = { app_lema: 'Lema de la app', reserva_pago: 'Instrucciones de pago de la reserva ({minutos})', reserva_politica: 'Política de cancelación ({devolucion} {horas} {dias})',
+          premium_titulo: 'Título de Premium', premium_texto: 'Texto de Premium', pago_instrucciones: 'Instrucciones para pagar Premium', bienvenida: 'Bienvenida', aviso_seguridad: 'Aviso de seguridad' };
+        html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><textarea data-t="' + k + '">' + esc(a.textos[k] || '') + '</textarea>').join('') +
+          '<button class="btn block" id="txOk" style="margin-top:12px">Guardar textos</button></div>';
+      } else if (sub === 'push') {
+        html = '<div class="card"><h3 style="margin-top:0">🔔 Notificaciones push</h3><p class="small muted">' + (a.vapid_public && a.push ? '✅ Claves configuradas.' : 'Genera las claves una sola vez para enviar notificaciones al celular.') + '</p>' +
+          '<div class="row wrap"><button class="btn sec small" id="ajVapid">' + (a.vapid_public ? 'Regenerar claves' : 'Generar claves push') + '</button><button class="btn sec small" id="ajPing">Probar función "enviar"</button><button class="btn sec small" id="ajYo">Prueba: aviso solo a mí</button></div></div>';
+      } else {
+        html = '<div class="card"><h3 style="margin-top:0">🧹 Mantención</h3><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">Limpiar ahora</button></div>' +
+          '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><p class="small">Versión instalada: <b>' + esc(String((await Api.ajustes(true)).version_bd || '?')) + '</b> · esperada por la app: <b>' + BD + '</b></p></div>';
+      }
+      C.innerHTML = nav + html;
+      C.onclick = async (e) => {
+        const t = e.target.closest('[data-s]'); if (t) return ir(t.dataset.s);
+        const al = e.target.closest('.alOk');
+        if (al) {
+          const c = al.closest('[data-slot]');
+          try { await Api.rpc('admin_guardar_link', { p_slot: +c.dataset.slot, p_monto: +c.querySelector('.alM').value || 0, p_url: c.querySelector('.alU').value, p_texto: c.querySelector('.alT').value, p_activo: c.querySelector('input[type=radio]').checked }); toast('Guardado'); ir('precios'); } catch (er) { toast(er.message); }
+          return;
+        }
+        const pl = e.target.closest('.plOk');
+        if (pl) {
+          const c = pl.closest('[data-plan]'), lim = {};
+          c.querySelectorAll('[data-k]').forEach((i) => { lim[i.dataset.k] = i.type === 'checkbox' ? i.checked : (+i.value || 0); });
+          try {
+            await Api.rpc('admin_guardar_plan', { p_codigo: c.dataset.plan, p_nombre: c.querySelector('.plN').value, p_descripcion: c.querySelector('.plDe').value, p_limites: lim,
+              p_beneficios: c.querySelector('.plB').value.split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: +c.querySelector('.plD').value || 30 });
+            toast('Plan guardado'); ir('planes');
+          } catch (er) { toast(er.message); }
+          return;
+        }
+        if (e.target.id === 'rgOk') {
+          const p = {}; C.querySelectorAll('[data-r]').forEach((i) => { if (i.value !== '') p[i.dataset.r] = +i.value; });
+          try { await Api.rpc('admin_guardar_config', { p }); toast('Reglas guardadas'); } catch (er) { toast(er.message); }
+          return;
+        }
+        if (e.target.id === 'txOk') {
+          const p = {}; C.querySelectorAll('[data-t]').forEach((i) => { p[i.dataset.t] = i.value; });
+          try { await Api.rpc('admin_guardar_textos', { p }); toast('Textos guardados'); } catch (er) { toast(er.message); }
+          return;
+        }
+        if (e.target.id === 'mLimpiar') {
+          e.target.disabled = true;
+          try { const x = await Api.funcion('limpiar'); toast('Listo: ' + (x.borrados || 0) + ' archivos borrados'); } catch (er) { toast(er.message); }
+          e.target.disabled = false; return;
+        }
+        if (e.target.id === 'ajVapid') {
+          if (a.vapid_public && !await confirmar('Si regeneras las claves, cada persona deberá activar de nuevo las notificaciones. ¿Seguir?', 'Regenerar', true)) return;
+          try {
+            const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+            const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k.publicKey));
+            const pub = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            const priv = (await crypto.subtle.exportKey('jwk', k.privateKey)).d;
+            await Api.rpc('admin_guardar_ajustes', { p: { vapid_public: pub, vapid_private: priv } });
+            toast('Claves creadas. Activa las notificaciones en Más → Mi cuenta.'); ir('push');
+          } catch (er) { toast(er.message); }
+          return;
+        }
+        if (e.target.id === 'ajPing') { try { const r = await Api.funcion('ping'); toast('✅ Función "enviar" v' + r.version + (r.servicio ? ' lista' : ' sin clave de servidor')); } catch (er) { toast(er.message); } return; }
+        if (e.target.id === 'ajYo') {
+          try { await U.activarPush(); await Api.rpc('admin_prueba_push'); const r = await Api.funcion('push'); toast('Push enviados: ' + (r.enviados || 0) + (r.error ? ' · ' + r.error : '')); } catch (er) { toast(er.message); }
+        }
       };
     }
   };

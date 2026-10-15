@@ -2,13 +2,15 @@
 (function (g) {
   'use strict';
   const U = g.U, Api = g.Api, cfg = g.EST_CONFIG;
-  const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, estrellas, imgMini, urlFoto, hace, fecha, hora } = U;
+  const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, estrellas, imgMini, urlFoto, hace, fecha, hora, fh, quedan } = U;
   const V = $('vista');
   let rutaActual = '', pollChat = null, ajustes = null;
   const COLORES_GRATIS = [['Azul', '#2563eb'], ['Negro', '#0f172a'], ['Verde', '#16a34a'], ['Rojo', '#dc2626'], ['Violeta', '#7c3aed'], ['Naranja', '#ea580c']];
   const ICONOS = ['🚗', '🏍️', '🛻', '🚙', '🚕', '🅿️', '😎', '⭐', '🔑', '🏠', '🐶', '⚽'];
   const MODAL = { hora: 'Por hora', dia: 'Por día', mes: 'Mensual' };
-  const ESTADO_ARR = { pendiente: ['warn', 'Pendiente'], aceptado: ['ok', 'Aceptado'], rechazado: ['bad', 'Rechazado'], cancelado: ['', 'Cancelado'], finalizado: ['brand', 'Finalizado'] };
+  const ESTADO_ARR = { pendiente: ['warn', 'Pendiente'], por_pagar: ['warn', '💳 Esperando pago'], en_revision: ['brand', '🧾 En revisión'],
+    aceptado: ['ok', '✅ Confirmada'], rechazado: ['bad', 'Rechazada'], cancelado: ['', 'Cancelada'], finalizado: ['brand', 'Finalizada'], expirado: ['', '⌛ Vencida'] };
+  const PAGO = { devolver: ['bad', '💸 Por devolver'], devuelto: ['ok', 'Devuelto'], saldo: ['brand', '💰 Saldo a favor'], perdido: ['', 'Sin devolución'], aplicado: ['', 'Saldo usado'] };
   const ESTADO_EST = { disponible: ['ok', 'Disponible'], ocupado: ['warn', 'Ocupado'], pausado: ['', 'Pausado'], oculto: ['bad', 'Oculto por el admin'] };
 
   async function ajustesPub() {
@@ -76,72 +78,211 @@
   }
   function pedirLogin(motivo) { vLogin(motivo || 'Crea tu cuenta para continuar', 'up'); }
 
-  /* ======================= Detalle de estacionamiento ======================= */
+  /* ======================= Detalle de estacionamiento (público) ======================= */
   async function vDetalle(id) {
     cargando();
     let d;
     try { d = await Api.rpc('estacionamiento_detalle', { p_id: id }); } catch (e) { V.innerHTML = volver() + '<div class="vacio">' + esc(e.message) + '</div>'; return; }
     const est = ESTADO_EST[d.estado] || ['', d.estado];
     const fotos = (d.fotos || []).map((f) => '<img src="' + esc(urlFoto(f)) + '" alt="Foto del estacionamiento" loading="lazy">').join('');
-    const precios = [['hora', d.ph, '/hora'], ['dia', d.pd, '/día'], ['mes', d.pm, '/mes']].filter((p) => p[1])
+    const precios = [['hora', d.ph], ['dia', d.pd], ['mes', d.pm]].filter((p) => p[1])
       .map((p) => '<div class="precio"><b>' + clp(p[1]) + '</b><small>' + MODAL[p[0]] + '</small></div>').join('');
     const arr = d.mi_arriendo;
+    const ocup = (d.ocupado || []).slice(0, 6);
     V.innerHTML = volver('Mapa') + '<div class="galeria">' + (fotos || '<img alt="">') + '</div>' +
       '<div class="row between" style="margin-top:14px"><h1 class="grow">' + esc(d.titulo) + '</h1>' + (d.estado !== 'disponible' ? pill(est) : '') + '</div>' +
-      '<div class="muted">' + ico('pin') + ' ' + esc(d.comuna || 'Santiago') + '</div>' +
       '<div class="precios">' + precios + '</div>' +
       '<div class="carac">' + g.Mapa.caracs({ t: d.techado, h: d.acceso24, sg: d.seguridad, cg: d.carga, v: d.vehiculo }).map((x) => '<span class="pill">' + esc(x) + '</span>').join('') + '</div>' +
       (d.descripcion ? '<p style="margin-top:12px;white-space:pre-line">' + esc(d.descripcion) + '</p>' : '') +
-      (d.mio && !d.visible ? '<div class="aviso warn" style="margin-top:12px">⚠️ Este estacionamiento <b>no se ve en el mapa</b> porque superas el límite de tu plan. <a href="#/premium">Hazte Premium</a> para mostrar hasta 10.</div>' : '') +
-      '<div class="sec-tit">Ubicación</div><div class="mini-mapa" id="mm"></div>' +
-      (d.exacta ? '<div class="card" style="margin-top:8px"><b>📍 ' + esc(d.direccion) + '</b><div class="row" style="margin-top:8px"><a class="btn small sec" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + d.lat + ',' + d.lng + '">Cómo llegar</a></div></div>'
-        : '<p class="small muted">🔒 Ubicación aproximada. La dirección exacta aparece cuando el dueño acepta tu solicitud.</p>') +
-      '<div class="sec-tit">Publicado por</div><a class="item" href="#/u/' + d.dueno.id + '">' + avatar(d.dueno) + '<div class="grow"><b>' + nombreCon(d.dueno) + '</b><div class="small">' + estrellas(d.dueno.calif) +
-      (d.dueno.calif_n ? ' <span class="muted">(' + d.dueno.calif_n + ')</span>' : '') + ' · <span class="muted">desde ' + fecha(d.dueno.desde) + '</span></div></div>' + ico('back', 'rot') + '</a>' +
-      (arr ? '<div class="aviso" style="margin-top:12px">Tu solicitud (' + esc(MODAL[arr.modalidad]) + '): ' + pill(ESTADO_ARR[arr.estado]) + ' <a href="#/mis/arriendos">Ver</a></div>' : '') +
+      (d.mio && !d.visible ? '<div class="aviso warn" style="margin-top:12px">⚠️ Este estacionamiento <b>no se ve en el mapa</b> porque superas el límite de tu plan. <a href="#/premium">Hazte Premium</a>.</div>' : '') +
+      '<div class="sec-tit">Ubicación exacta</div><div class="card"><b>📍 ' + esc(d.direccion) + '</b>' + (d.comuna ? '<div class="small muted">' + esc(d.comuna) + '</div>' : '') +
+      '<div class="mini-mapa" id="mm" style="margin-top:10px"></div>' +
+      '<div class="row" style="margin-top:10px"><a class="btn small sec" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + d.lat + ',' + d.lng + '">🧭 Cómo llegar</a></div></div>' +
+      (ocup.length ? '<div class="sec-tit">Horarios ya reservados</div><div class="card small">' + ocup.map((o) => '<div>⛔ ' + esc(fh(o.inicio)) + ' → ' + esc(fh(o.fin)) + '</div>').join('') + '</div>' : '') +
+      '<div class="sec-tit">Publicado por</div>' + (d.logueado ? '<a class="item" href="#/u/' + d.dueno.id + '">' : '<div class="item">') + avatar(d.dueno) + '<div class="grow"><b>' + nombreCon(d.dueno) + '</b><div class="small">' + estrellas(d.dueno.calif) +
+      (d.dueno.calif_n ? ' <span class="muted">(' + d.dueno.calif_n + ')</span>' : '') + ' · <span class="muted">desde ' + fecha(d.dueno.desde) + '</span></div></div>' + (d.logueado ? '</a>' : '</div>') +
+      (arr ? '<a class="aviso" style="display:block;margin-top:12px;color:var(--ink)" href="#/r/' + arr.id + '">Tu reserva: ' + pill(ESTADO_ARR[arr.estado] || ['', arr.estado]) + ' · Ver →</a>' : '') +
       (d.mio ? '<div class="sec-tit">Tu estacionamiento</div><div class="card"><div class="row between"><span>Estado</span><select id="dEstado" style="width:auto"' + (d.estado === 'oculto' ? ' disabled' : '') + '>' +
         ['disponible', 'ocupado', 'pausado'].map((s) => '<option value="' + s + '"' + (d.estado === s ? ' selected' : '') + '>' + ESTADO_EST[s][1] + '</option>').join('') + '</select></div>' +
-        '<p class="small muted" style="margin:8px 0 0">' + ico('eye') + ' ' + (Api.premium() ? (d.vistas || 0) + ' visitas' : 'Estadísticas de visitas: <a href="#/premium">Premium</a>') + '</p></div>' : '') +
-      '<p class="small muted" style="margin-top:14px">🔒 Consejo: nunca pagues antes de ver el estacionamiento y conocer al dueño. Si algo parece estafa, denúncialo.</p>' +
+        '<p class="small muted" style="margin:8px 0 0">' + ico('eye') + ' ' + (Api.puede('estadisticas') ? (d.vistas || 0) + ' visitas' : 'Estadísticas: <a href="#/premium">Premium</a>') + '</p></div>' : '') +
+      '<p class="small muted" style="margin-top:14px">🔒 ' + esc(Api.texto('aviso_seguridad', 'Si algo parece estafa, denúncialo con evidencia.')) + '</p>' +
       '<div class="acciones">' + (d.mio
         ? '<a class="btn grow" href="#/editar/' + d.id + '">' + ico('edit') + ' Editar</a><button class="btn sec" id="dQR" aria-label="QR">' + ico('qr') + '</button>'
-        : (!arr && d.estado === 'disponible' ? '<button class="btn grow" id="dSol">Solicitar arriendo</button>' : '') +
+        : (!arr && d.estado === 'disponible' ? '<button class="btn grow" id="dSol">📅 Reservar</button>' : '') +
           '<button class="btn sec' + (arr || d.estado !== 'disponible' ? ' grow' : '') + '" id="dChat">' + ico('chat') + (arr || d.estado !== 'disponible' ? ' Contactar' : '') + '</button>' +
           '<button class="btn sec" id="dFav" aria-label="Favorito" style="' + (d.favorito ? 'color:#e11d48' : '') + '">' + ico('heart') + '</button>' +
-          '<button class="btn sec" id="dQR" aria-label="QR">' + ico('qr') + '</button><button class="btn sec" id="dDen" aria-label="Denunciar">' + ico('flag') + '</button>') + '</div>';
+          '<button class="btn sec" id="dQR" aria-label="QR">' + ico('qr') + '</button>' + (d.logueado ? '<button class="btn sec" id="dDen" aria-label="Denunciar">' + ico('flag') + '</button>' : '')) + '</div>';
     U.ponerIconos(V);
-    g.Mapa.mini($('mm'), d.lat, d.lng, d.exacta);
+    g.Mapa.mini($('mm'), d.lat, d.lng, true);
     const url = U.enlace('#/e/' + d.id);
-    $('dQR').onclick = () => U.mostrarQR(d.titulo, 'Escanea para ver este estacionamiento en Estaciona', url, Api.premium() ? Api.cuenta.color : '#000');
+    $('dQR').onclick = () => U.mostrarQR(d.titulo, 'Escanea para ver este estacionamiento en Estaciona', url, Api.puede('qr_color') ? Api.cuenta.color : '#000');
     if (d.mio) {
       $('dEstado').onchange = async (e) => { try { await Api.rpc('estado_estacionamiento', { p_id: d.id, p_estado: e.target.value }); toast('Estado actualizado'); g.Mapa.recargar(); } catch (er) { fallo(er); } };
       return;
     }
-    if ($('dSol')) $('dSol').onclick = () => solicitar(d);
-    $('dChat').onclick = () => contactar(d.dueno.id);
-    $('dFav').onclick = async () => {
+    const conSesion = (fn, motivo) => () => (Api.logueado() ? fn() : (destino = '#/e/' + d.id, pedirLogin(motivo)));
+    if ($('dSol')) $('dSol').onclick = conSesion(() => reservar(d), 'Crea tu cuenta para reservar');
+    $('dChat').onclick = conSesion(() => contactar(d.dueno.id), 'Crea tu cuenta para contactar al dueño');
+    $('dFav').onclick = conSesion(async () => {
       try { const si = await Api.rpc('favorito', { p_id: d.id }); $('dFav').style.color = si ? '#e11d48' : ''; toast(si ? 'Guardado en favoritos ❤️' : 'Quitado de favoritos'); }
       catch (e) { fallo(e); }
-    };
-    $('dDen').onclick = () => denunciar('estacionamiento', d.id, d.titulo);
+    }, 'Crea tu cuenta para guardar favoritos');
+    if ($('dDen')) $('dDen').onclick = () => denunciar('estacionamiento', d.id, d.titulo);
   }
 
-  function solicitar(d) {
-    const ops = [['hora', d.ph], ['dia', d.pd], ['mes', d.pm]].filter((x) => x[1]);
-    const hoy = new Date(); hoy.setMinutes(hoy.getMinutes() - hoy.getTimezoneOffset());
-    const c = modal('<h2>Solicitar arriendo</h2><p class="muted small">' + esc(d.titulo) + '</p><label>Modalidad</label>' +
-      ops.map((o, i) => '<label class="check"><input type="radio" name="sMod" value="' + o[0] + '"' + (i === 0 ? ' checked' : '') + '> ' + MODAL[o[0]] + ' · <b>' + clp(o[1]) + '</b></label>').join('') +
-      '<label>¿Desde cuándo?</label><input type="date" id="sDesde" value="' + hoy.toISOString().slice(0, 10) + '" min="' + hoy.toISOString().slice(0, 10) + '">' +
-      '<label>Mensaje para el dueño (opcional)</label><textarea id="sNota" maxlength="300" placeholder="Ej: Hola, tengo un auto mediano y lo necesito de lunes a viernes."></textarea>' +
-      '<p class="small muted">El pago se acuerda directo con el dueño. Estaciona no cobra ni recibe dinero.</p>' +
-      '<button class="btn block" id="sOk">Enviar solicitud</button>');
-    c.querySelector('#sOk').onclick = async (e) => {
+  // Reservar: modalidad, desde cuándo y por cuánto tiempo. Queda apartado mientras se paga.
+  async function reservar(d) {
+    await Api.ajustes();
+    const ops = [['hora', d.ph, 'horas', 24], ['dia', d.pd, 'días', 31], ['mes', d.pm, 'meses', 12]].filter((x) => x[1]);
+    const ahora = new Date(); ahora.setMinutes(0, 0, 0); ahora.setHours(ahora.getHours() + 1);
+    const local = (dt) => { const x = new Date(dt); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16); };
+    const mins = (Api._aj.reglas || {}).minutos_pago || 30;
+    const c = modal('<h2>📅 Reservar</h2><p class="muted small">' + esc(d.titulo) + '</p>' +
+      '<label>¿Cómo quieres arrendar?</label><div class="seg" id="rMod">' + ops.map((o, i) => '<button type="button" data-m="' + o[0] + '" class="' + (i === 0 ? 'on' : '') + '">' + MODAL[o[0]] + '<br><b>' + clp(o[1]) + '</b></button>').join('') + '</div>' +
+      '<div class="grid2"><div><label>Desde</label><input type="datetime-local" id="rIni" value="' + local(ahora) + '" min="' + local(new Date()) + '"></div>' +
+      '<div><label id="rCantL">Cantidad</label><input type="number" id="rCant" inputmode="numeric" min="1" value="1"></div></div>' +
+      '<div class="card" style="margin-top:12px"><div class="row between"><span>Total</span><b id="rTot" style="font-size:20px"></b></div><div class="small muted" id="rHasta"></div></div>' +
+      '<label>Mensaje para el dueño (opcional)</label><textarea id="rNota" maxlength="300" placeholder="Ej: auto mediano, llego a las 8:00"></textarea>' +
+      '<p class="small muted">⏳ Al reservar, el estacionamiento queda <b>apartado ' + mins + ' minutos</b> para que pagues y subas el comprobante.</p>' +
+      '<button class="btn block" id="rOk">Reservar y pagar</button>');
+    let mod = ops[0];
+    const calc = () => {
+      const n = Math.max(1, Math.min(mod[3], +c.querySelector('#rCant').value || 1));
+      c.querySelector('#rCantL').textContent = 'Cantidad de ' + mod[2] + ' (máx. ' + mod[3] + ')';
+      c.querySelector('#rTot').textContent = clp(mod[1] * n);
+      const ini = new Date(c.querySelector('#rIni').value);
+      if (!isNaN(ini)) {
+        const fin = new Date(ini);
+        if (mod[0] === 'hora') fin.setHours(fin.getHours() + n); else if (mod[0] === 'dia') fin.setDate(fin.getDate() + n); else fin.setMonth(fin.getMonth() + n);
+        c.querySelector('#rHasta').textContent = 'Hasta ' + fh(fin);
+      }
+    };
+    c.querySelector('#rMod').onclick = (e) => {
+      const b = e.target.closest('[data-m]'); if (!b) return;
+      c.querySelectorAll('#rMod button').forEach((x) => x.classList.toggle('on', x === b));
+      mod = ops.find((o) => o[0] === b.dataset.m); calc();
+    };
+    c.querySelector('#rCant').oninput = calc; c.querySelector('#rIni').oninput = calc; calc();
+    c.querySelector('#rOk').onclick = async (e) => {
+      const ini = new Date(c.querySelector('#rIni').value);
+      if (isNaN(ini)) { toast('Elige la fecha y hora'); return; }
       e.target.disabled = true;
       try {
-        await Api.rpc('solicitar_arriendo', { p_id: d.id, p_modalidad: c.querySelector('input[name=sMod]:checked').value, p_desde: c.querySelector('#sDesde').value || null, p_nota: c.querySelector('#sNota').value });
-        Api.empujar(); cerrarModal(); toast('¡Solicitud enviada! Te avisaremos cuando responda'); vDetalle(d.id); Api.refrescar();
+        const id = await Api.rpc('solicitar_arriendo', { p_id: d.id, p_modalidad: mod[0], p_inicio: ini.toISOString(),
+          p_cantidad: Math.max(1, +c.querySelector('#rCant').value || 1), p_nota: c.querySelector('#rNota').value });
+        Api.empujar(); cerrarModal(); toast('¡Reservado! Ahora paga y sube el comprobante'); location.hash = '#/r/' + id; Api.refrescar();
       } catch (er) { e.target.disabled = false; cerrarModal(); fallo(er); }
     };
+  }
+
+  /* ======================= Una reserva ======================= */
+  async function vReserva(id) {
+    cargando();
+    await Api.ajustes();
+    let x;
+    try { x = (await Api.rpc('mis_arriendos')).find((r) => r.id === id); } catch (e) { V.innerHTML = volver() + '<div class="vacio">' + esc(e.message) + '</div>'; return; }
+    if (!x) { V.innerHTML = volver() + '<div class="vacio">Reserva no encontrada</div>'; return; }
+    const dueno = x.soy_dueno, e = x.est, o = x.otro, r = Api._aj.reglas || {};
+    const pagado = x.monto_pagar + x.saldo_aplicado;
+    const b = [];
+    if (!dueno && x.estado === 'por_pagar') {
+      b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
+        (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted">' + esc(x.pago.texto) + '</p>' : '')
+          : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>') +
+        '<label>Foto del comprobante</label><input type="file" id="rComp" accept="image/*"><button class="btn block" id="rSubir" style="margin-top:10px">📤 Subir comprobante</button>');
+    }
+    if (!dueno && x.estado === 'en_revision') b.push('<div class="aviso" style="margin-top:12px">🧾 El dueño está revisando tu comprobante. Te avisaremos apenas responda.</div>');
+    if (dueno && ['en_revision', 'pendiente'].includes(x.estado)) {
+      b.push('<div class="card" style="margin-top:12px"><b>🧾 Comprobante</b>' + (x.comprobante ? '<img class="ver-img" id="rImg" alt="Comprobante" style="margin-top:8px">' : '<p class="small muted">Sin comprobante (se usó saldo a favor o es una solicitud antigua).</p>') +
+        '<div class="row" style="margin-top:10px"><button class="btn ok grow" id="rAprobar">✅ Aprobar</button><button class="btn bad grow" id="rRechazar">Rechazar</button></div></div>');
+    }
+    if (dueno && x.estado === 'por_pagar') b.push('<div class="aviso warn" style="margin-top:12px">⏳ Esperando que pague. Se libera sola en <b id="rReloj">' + quedan(x.expira_at) + '</b> min si no sube el comprobante.</div>');
+    if (x.pago_estado === 'devolver') b.push('<div class="aviso bad" style="margin-top:12px">💸 Hay que devolver ' + clp(pagado) + '.' + (dueno ? ' <button class="btn small" id="rDevuelto" style="margin-left:6px">Marcar devuelto</button>' : ' El dueño debe devolvértelo.') + '</div>');
+    if (x.pago_estado === 'saldo') b.push('<div class="aviso" style="margin-top:12px">💰 Saldo a favor de ' + clp(x.saldo_monto) + ' con este dueño hasta el ' + fecha(x.saldo_hasta) + '. Se descuenta solo en tu próxima reserva con él.</div>');
+    if (x.motivo) b.push('<p class="small"><b>Motivo:</b> ' + esc(x.motivo) + '</p>');
+    const acc = [];
+    if (['pendiente', 'por_pagar', 'en_revision', 'aceptado'].includes(x.estado)) acc.push('<button class="btn line grow" id="rCancelar">Cancelar reserva</button>');
+    if (x.estado === 'aceptado') acc.push('<button class="btn grow" id="rFin">Finalizar</button>');
+    if (x.estado === 'finalizado' && !x.calificado) acc.push('<button class="btn gold grow" id="rCalif">⭐ Calificar</button>');
+    V.innerHTML = volver('Reservas') +
+      '<div class="card"><div class="row">' + imgMini(e.foto, 'thumb sm') + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">📍 ' + esc(e.direccion) + (e.comuna ? ', ' + esc(e.comuna) : '') + '</div></div></div>' +
+      '<div class="row" style="margin-top:10px"><a class="btn small sec" href="#/e/' + e.id + '">Ver ficha</a><a class="btn small sec" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + e.lat + ',' + e.lng + '">🧭 Cómo llegar</a></div></div>' +
+      '<div class="card"><div class="row between"><b>' + (dueno ? 'Reserva recibida' : 'Tu reserva') + '</b>' + pill(ESTADO_ARR[x.estado] || ['', x.estado]) + '</div>' +
+      '<table class="tabla" style="margin-top:8px"><tr><td>Desde</td><td>' + esc(fh(x.inicio)) + '</td></tr><tr><td>Hasta</td><td>' + esc(fh(x.fin)) + '</td></tr>' +
+      '<tr><td>Modalidad</td><td>' + MODAL[x.modalidad] + ' × ' + x.cantidad + '</td></tr><tr><td>Total</td><td><b>' + clp(x.total) + '</b></td></tr>' +
+      (x.saldo_aplicado ? '<tr><td>Saldo a favor usado</td><td>−' + clp(x.saldo_aplicado) + '</td></tr>' : '') +
+      '<tr><td>' + (x.monto_pagar < x.total - x.saldo_aplicado ? 'Abono para confirmar' : 'A pagar') + '</td><td><b>' + clp(x.monto_pagar) + '</b></td></tr></table>' +
+      (x.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px">“' + esc(x.nota) + '”</p>' : '') + b.join('') + '</div>' +
+      '<div class="card"><a class="row" href="#/u/' + o.id + '" style="color:var(--ink)">' + avatar(o) + '<div class="grow"><b>' + nombreCon(o) + '</b><div class="small">' + estrellas(o.calif) + '</div></div></a>' +
+      '<div class="row" style="margin-top:10px"><button class="btn sec grow" id="rChat">' + ico('chat') + ' Chat</button>' +
+      (x.whatsapp ? '<a class="btn sec grow" target="_blank" rel="noopener" href="https://wa.me/' + esc(x.whatsapp.replace(/\D/g, '')) + '">📲 WhatsApp</a>' : '') + '</div></div>' +
+      (!dueno && ['por_pagar', 'en_revision', 'aceptado'].includes(x.estado) ? '<p class="small muted">' + esc(Api.texto('reserva_politica', '')) + '</p>' : '') +
+      (acc.length ? '<div class="row">' + acc.join('') + '</div>' : '');
+    U.ponerIconos(V);
+    if ($('rImg')) U.urlPrivada(x.comprobante).then((u) => { $('rImg').src = u; $('rImg').onclick = () => window.open(u, '_blank'); });
+    const recargar = () => { Api.empujar(); contadores(); vReserva(id); };
+    const hacer = async (fn, msg) => { try { await fn(); if (msg) toast(msg); recargar(); } catch (er) { fallo(er); } };
+    $('rChat').onclick = () => contactar(o.id);
+    if ($('rReloj')) pollChat = setInterval(() => {
+      if (!$('rReloj')) return;
+      $('rReloj').textContent = quedan(x.expira_at);
+      if (new Date(x.expira_at) < Date.now()) { clearInterval(pollChat); vReserva(id); }
+    }, 1000);
+    if ($('rSubir')) $('rSubir').onclick = async (ev) => {
+      const f = $('rComp').files[0]; if (!f) { toast('Elige la foto del comprobante'); return; }
+      ev.target.disabled = true; ev.target.textContent = 'Subiendo…';
+      try { const ruta = await U.subirFoto(f, 'privado', { lado: 1280, calidad: 0.7 }); await Api.rpc('subir_comprobante', { p_id: id, p_ruta: ruta }); toast('¡Comprobante enviado! 🧾'); recargar(); }
+      catch (er) { ev.target.disabled = false; ev.target.textContent = '📤 Subir comprobante'; fallo(er); }
+    };
+    if ($('rAprobar')) $('rAprobar').onclick = () => hacer(() => Api.rpc('responder_arriendo', { p_id: id, p_aceptar: true, p_motivo: null }), 'Reserva confirmada ✅');
+    if ($('rRechazar')) $('rRechazar').onclick = async () => {
+      const m = await U.pedirTexto('Motivo del rechazo', 'Ej: no recibí el pago / el comprobante no corresponde', 'Rechazar');
+      if (m != null) hacer(() => Api.rpc('responder_arriendo', { p_id: id, p_aceptar: false, p_motivo: m }), 'Reserva rechazada');
+    };
+    if ($('rDevuelto')) $('rDevuelto').onclick = () => hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'devuelto' }), 'Marcado como devuelto');
+    if ($('rFin')) $('rFin').onclick = async () => { if (await confirmar('¿Marcar este arriendo como finalizado?', 'Finalizar')) hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'finalizar' }), 'Finalizado. ¡Califica! ⭐'); };
+    if ($('rCalif')) $('rCalif').onclick = () => calificar(id, o.nombre, () => vReserva(id));
+    if ($('rCancelar')) $('rCancelar').onclick = async () => {
+      let txt = '¿Cancelar esta reserva?';
+      if (!dueno && ['en_revision', 'aceptado'].includes(x.estado) && pagado > 0) {
+        const min = (Date.now() - new Date(x.creado)) / 60000, hrs = (new Date(x.inicio) - Date.now()) / 3600000;
+        txt += min <= r.minutos_devolucion ? ' Se te devuelve lo pagado.' : hrs >= r.horas_cancelacion ? ' Lo pagado queda como saldo a favor.' : ' Con tan poca anticipación pierdes lo pagado.';
+      } else if (dueno && pagado > 0 && ['en_revision', 'aceptado'].includes(x.estado)) txt += ' Deberás devolver lo pagado.';
+      if (await confirmar(txt, 'Sí, cancelar', true)) hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'cancelar' }), 'Reserva cancelada');
+    };
+  }
+
+  /* ======================= Reservas (dueño y arrendatario) ======================= */
+  const FILTROS = [['revisar', '🧾 Por revisar'], ['proximas', '📅 Próximas'], ['pagando', '⏳ Esperando pago'], ['devolver', '💸 Por devolver'], ['mias', '🚗 Mis arriendos'], ['historial', '📚 Historial']];
+  const ACTIVAS = ['pendiente', 'por_pagar', 'en_revision', 'aceptado'];
+  function filtrar(l, f) {
+    if (f === 'revisar') return l.filter((x) => x.soy_dueno && ['en_revision', 'pendiente'].includes(x.estado));
+    if (f === 'proximas') return l.filter((x) => x.estado === 'aceptado').sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+    if (f === 'pagando') return l.filter((x) => x.estado === 'por_pagar');
+    if (f === 'devolver') return l.filter((x) => x.pago_estado === 'devolver');
+    if (f === 'mias') return l.filter((x) => !x.soy_dueno && ACTIVAS.includes(x.estado));
+    return l.filter((x) => !ACTIVAS.includes(x.estado));
+  }
+  function tarjetaArriendo(x) {
+    return '<a class="card" style="display:block;margin-top:10px;color:var(--ink)" href="#/r/' + x.id + '"><div class="row">' + imgMini(x.est.foto, 'thumb sm') +
+      '<div class="grow"><b class="ell" style="display:block">' + esc(x.est.titulo) + '</b><div class="small muted">' + esc(fh(x.inicio)) + ' · ' + MODAL[x.modalidad] + ' × ' + x.cantidad + '</div>' +
+      '<div class="small">' + (x.soy_dueno ? '👤 ' + esc(x.otro.nombre) : '🅿️ ' + esc(x.otro.nombre)) + ' · ' + clp(x.total) + '</div></div>' +
+      '<div style="text-align:right">' + pill(ESTADO_ARR[x.estado] || ['', x.estado]) + (PAGO[x.pago_estado] ? '<div style="margin-top:4px">' + pill(PAGO[x.pago_estado]) + '</div>' : '') + '</div></div></a>';
+  }
+  async function vReservas(f) {
+    V.innerHTML = '<h1>Reservas</h1><div id="rsC"><div class="spin"></div></div>';
+    let l, p;
+    try { [l, p] = await Promise.all([Api.rpc('mis_arriendos'), Api.rpc('panel')]); } catch (e) { $('rsC').innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; return; }
+    f = f || (p.revisar ? 'revisar' : filtrar(l, 'mias').length ? 'mias' : 'proximas');
+    const falta = [p.falta.verificar && ['#/verificar', '🪪 Verifica tu identidad'], p.falta.whatsapp && ['#/mas/perfil', '📲 Agrega tu WhatsApp'],
+      p.falta.link && ['#/mas/links', '💳 Configura tu link de pago'], p.falta.publicar && ['#/publicar', '🅿️ Publica tu estacionamiento']].filter(Boolean);
+    const lista = filtrar(l, f);
+    $('rsC').innerHTML = '<div class="kpis">' + [['revisar', '🧾 Por revisar', p.revisar], ['proximas', '📅 Hoy', p.hoy], ['pagando', '⏳ Esperando pago', p.pagando], ['devolver', '💸 Por devolver', p.devolver]]
+      .map((k) => '<a class="kpi" href="#/reservas/' + k[0] + '" style="color:var(--ink)"><b>' + k[2] + '</b><small>' + k[1] + '</small></a>').join('') + '</div>' +
+      (falta.length ? '<div class="card" style="margin-top:12px"><b>✅ Lo que te falta configurar</b>' + falta.map((x) => '<a class="row" style="margin-top:8px" href="' + x[0] + '">' + x[1] + ' →</a>').join('') + '</div>' : '') +
+      '<div class="seg" style="margin-top:14px">' + FILTROS.map((t) => '<a href="#/reservas/' + t[0] + '" class="' + (t[0] === f ? 'on' : '') + '">' + t[1] + ' <small>' + filtrar(l, t[0]).length + '</small></a>').join('') + '</div>' +
+      (lista.length ? lista.map(tarjetaArriendo).join('') : '<div class="vacio">' + ico('car') + '<p>' + (f === 'mias' ? 'Aún no arriendas. Busca en el mapa y reserva.' : 'Nada por aquí.') + '</p>' + (f === 'mias' ? '<a class="btn" href="#/">Ir al mapa</a>' : '') + '</div>');
+    U.ponerIconos($('rsC'));
   }
   async function contactar(uid) {
     try { const id = await Api.rpc('abrir_conversacion', { p_con: uid }); location.hash = '#/chat/' + id; } catch (e) { fallo(e); }
@@ -178,13 +319,11 @@
       '<h1 style="margin-top:10px">' + nombreCon(p) + '</h1><div class="muted small">' + esc(p.comuna || '') + (p.comuna ? ' · ' : '') + 'En Estaciona desde ' + fecha(p.desde) + '</div>' +
       '<div style="margin:8px 0">' + estrellas(p.calif) + (p.calif_n ? ' <span class="muted small">(' + p.calif_n + ' opiniones)</span>' : '') + '</div>' +
       (p.bio ? '<p>' + esc(p.bio) + '</p>' : '') + (p.verificado ? '<span class="pill ok">' + ico('shield') + ' Identidad verificada</span>' : '<span class="pill warn">Sin verificar</span>') +
-      '<div class="row" style="margin-top:14px;justify-content:center">' + (mio ? '<a class="btn" href="#/perfil">Editar mi perfil</a>'
+      '<div class="row" style="margin-top:14px;justify-content:center">' + (mio ? '<a class="btn" href="#/mas/perfil">Editar mi perfil</a>'
         : '<button class="btn" id="pChat">' + ico('chat') + ' Contactar</button><button class="btn sec" id="pBlq">' + ico('ban') + ' ' + (p.bloqueado ? 'Desbloquear' : 'Bloquear') + '</button><button class="btn sec" id="pDen" aria-label="Denunciar">' + ico('flag') + '</button>') +
       '<button class="btn sec" id="pQR" aria-label="QR">' + ico('qr') + '</button></div></div>' +
       '<div class="sec-tit">Estacionamientos (' + p.estacionamientos.length + ')</div>' +
-      (p.estacionamientos.length ? p.estacionamientos.map((e) => '<a class="item" href="#/e/' + e.id + '">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div></div></a>').join('') : '<div class="vacio">Aún no publica estacionamientos</div>') +
-      '<div class="sec-tit">Opiniones</div>' + (p.opiniones.length ? p.opiniones.map((o) => '<div class="card"><div class="row between"><b>' + esc(o.autor) + '</b><span class="estrellas">' + '★'.repeat(o.estrellas) + '<span class="muted">' + '★'.repeat(5 - o.estrellas) + '</span></span></div>' +
-        (o.comentario ? '<p style="margin:6px 0 0">' + esc(o.comentario) + '</p>' : '') + '<div class="small muted">' + hace(o.fecha) + '</div></div>').join('') : '<div class="vacio">Sin opiniones todavía</div>');
+      (p.estacionamientos.length ? p.estacionamientos.map((e) => '<a class="item" href="#/e/' + e.id + '">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div></div></a>').join('') : '<div class="vacio">Aún no publica estacionamientos</div>');
     U.ponerIconos(V);
     $('pQR').onclick = () => U.mostrarQR(p.nombre, 'Perfil en Estaciona', U.enlace('#/u/' + p.id), p.premium ? p.color : '#000');
     if (mio) return;
@@ -214,7 +353,7 @@
       if (!e.mio) { location.hash = '#/e/' + id; return; }
     } else if (a.uso.publicados >= a.lim.publicar) {
       V.innerHTML = '<h1>Publicar estacionamiento</h1><div class="card center"><div style="font-size:48px">⭐</div><h2>Llegaste al límite de tu plan</h2>' +
-        '<p class="muted">Con el plan Gratis puedes publicar ' + a.lim.publicar + ' estacionamiento. Con <b>Premium</b> publicas hasta <b>10</b>, con pin destacado y estadísticas.</p>' +
+        '<p class="muted">Con el plan Gratis puedes publicar ' + a.lim.publicar + ' estacionamiento. Con <b>Premium</b> publicas más, con pin dorado destacado y estadísticas.</p>' +
         '<a class="btn gold block" href="#/premium">Hazte Premium</a><a class="btn line block" style="margin-top:8px" href="#/mis/publicados">Ver mis estacionamientos</a></div>';
       return;
     }
@@ -308,70 +447,85 @@
     };
   }
 
-  /* ======================= Mis cosas ======================= */
-  async function vMis(tab) {
-    tab = tab || 'publicados';
-    const tabs = [['publicados', 'Mis estacionamientos'], ['solicitudes', 'Solicitudes recibidas'], ['arriendos', 'Mis arriendos'], ['favoritos', 'Favoritos']];
-    V.innerHTML = '<h1>Mis cosas</h1><div class="tabs">' + tabs.map((t) => '<a href="#/mis/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="misC"><div class="spin"></div></div>';
-    const C = $('misC'), a = Api.cuenta;
+  /* ======================= Más (perfil, estacionamientos, links, plan…) ======================= */
+  const SUBS = [['perfil', '👤 Perfil'], ['estacionamientos', '🅿️ Mis estacionamientos'], ['links', '💳 Links de pago'], ['favoritos', '❤️ Favoritos'],
+    ['plan', '⭐ Plan'], ['estadisticas', '📊 Estadísticas'], ['cuenta', '⚙️ Mi cuenta']];
+  async function vMas(sub) {
+    sub = sub || 'cuenta';
+    V.innerHTML = '<div class="seg">' + SUBS.map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
+    const T = $('masC');
     try {
-      if (tab === 'publicados') {
-        const r = await Api.rpc('mis_estacionamientos');
-        C.innerHTML = '<div class="row between"><span class="muted small">Usas ' + r.length + ' de ' + a.lim.publicar + ' publicaciones</span><a class="btn small" href="#/publicar">' + ico('plus') + ' Publicar</a></div>' +
-          '<div class="barra"><i style="width:' + Math.min(100, r.length / a.lim.publicar * 100) + '%"></i></div>' +
-          (!Api.premium() ? '<a class="aviso" style="display:block;margin:10px 0;color:var(--ink)" href="#/premium">⭐ <b>Premium:</b> publica hasta 10, pin dorado destacado y estadísticas de visitas.</a>' : '') +
-          (r.length ? r.map((e) => '<div class="card" style="margin-top:10px"><a class="row" href="#/e/' + e.id + '" style="color:var(--ink)">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div>' +
-              '<div style="margin-top:4px">' + pill(ESTADO_EST[e.estado]) + (!e.visible ? ' <span class="pill warn">No visible: supera tu plan</span>' : '') + '</div></div></a>' +
-              (e.stats ? '<div class="row small muted" style="margin-top:8px;gap:14px">' + ico('eye') + ' ' + e.stats.vistas + ' visitas · ❤️ ' + e.stats.favoritos + ' · 📩 ' + e.stats.solicitudes + ' solicitudes</div>'
-                : '<div class="small muted" style="margin-top:8px">📊 Estadísticas: <a href="#/premium">solo Premium</a></div>') +
-              '<div class="row" style="margin-top:10px"><select data-est="' + e.id + '" class="grow"' + (e.estado === 'oculto' ? ' disabled' : '') + '>' + ['disponible', 'ocupado', 'pausado'].map((s) => '<option value="' + s + '"' + (e.estado === s ? ' selected' : '') + '>' + ESTADO_EST[s][1] + '</option>').join('') + '</select>' +
-              '<a class="btn sec small" href="#/editar/' + e.id + '">' + ico('edit') + ' Editar</a></div></div>').join('')
-            : '<div class="vacio">' + ico('car') + '<p>¿Tienes un estacionamiento sin usar? Publícalo y gana plata extra.</p><a class="btn" href="#/publicar">Publicar ahora</a></div>');
-        C.onchange = async (ev) => {
-          const s = ev.target.closest('[data-est]'); if (!s) return;
-          try { await Api.rpc('estado_estacionamiento', { p_id: s.dataset.est, p_estado: s.value }); toast('Estado actualizado'); g.Mapa.recargar(); } catch (er) { fallo(er); }
-        };
-      } else if (tab === 'favoritos') {
-        const r = await Api.rpc('mis_favoritos');
-        C.innerHTML = '<p class="muted small">' + r.length + ' de ' + (Api.premium() ? 'ilimitados' : a.lim.favoritos) + ' favoritos</p>' +
-          (r.length ? r.map((e) => '<a class="item" href="#/e/' + e.id + '">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div></div>' + (e.estado !== 'disponible' ? pill(ESTADO_EST[e.estado]) : '') + '</a>').join('')
-            : '<div class="vacio">' + ico('heart') + '<p>Guarda estacionamientos con ❤️ para encontrarlos rápido.</p></div>');
-      } else {
-        const dueno = tab === 'solicitudes';
-        const r = (await Api.rpc('mis_arriendos')).filter((x) => x.soy_dueno === dueno);
-        C.innerHTML = (!dueno ? '<p class="muted small">Arriendos activos: ' + a.uso.arrendando + ' de ' + a.lim.arrendar + (Api.premium() ? '' : ' · <a href="#/premium">Premium: hasta 10</a>') + '</p>' : '') +
-          (r.length ? r.map((x) => tarjetaArriendo(x, dueno)).join('')
-            : '<div class="vacio">' + ico(dueno ? 'bell' : 'car') + '<p>' + (dueno ? 'Aún no recibes solicitudes.' : 'Aún no arriendas. Busca en el mapa y solicita.') + '</p>' + (dueno ? '' : '<a class="btn" href="#/">Ir al mapa</a>') + '</div>');
-        C.onclick = (ev) => accionArriendo(ev, tab);
-      }
-      U.ponerIconos(C);
-    } catch (e) { C.innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
+      if (sub === 'perfil') return vEditarPerfil(T);
+      if (sub === 'cuenta') return vCuenta(T);
+      if (sub === 'plan') return vPremium(T);
+      if (sub === 'links') return vLinks(T);
+      if (sub === 'estadisticas') return vEstadisticas(T);
+      if (sub === 'favoritos') return vFavoritos(T);
+      return vPublicados(T);
+    } catch (e) { T.innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
   }
-  function tarjetaArriendo(x, dueno) {
-    const b = [];
-    if (dueno && x.estado === 'pendiente') b.push('<button class="btn ok small" data-a="aceptar" data-id="' + x.id + '">Aceptar</button>', '<button class="btn sec small" data-a="rechazar" data-id="' + x.id + '">Rechazar</button>');
-    if (x.estado === 'aceptado') b.push('<button class="btn small" data-a="finalizar" data-id="' + x.id + '">Finalizar</button>');
-    if (['pendiente', 'aceptado'].includes(x.estado) && !(dueno && x.estado === 'pendiente')) b.push('<button class="btn line small" data-a="cancelar" data-id="' + x.id + '">Cancelar</button>');
-    if (x.estado === 'finalizado' && !x.calificado) b.push('<button class="btn gold small" data-a="calificar" data-id="' + x.id + '" data-n="' + esc(x.otro.nombre) + '">⭐ Calificar</button>');
-    b.push('<button class="btn sec small" data-a="chat" data-u="' + x.otro.id + '">' + ico('chat') + ' Chat</button>');
-    return '<div class="card" style="margin-top:10px"><a class="row" href="#/e/' + x.est.id + '" style="color:var(--ink)">' + imgMini(x.est.foto, 'thumb sm') + '<div class="grow"><b class="ell" style="display:block">' + esc(x.est.titulo) + '</b>' +
-      '<div class="small muted">' + MODAL[x.modalidad] + (x.desde ? ' · desde ' + fecha(x.desde) : '') + ' · ' + hace(x.creado) + '</div></div>' + pill(ESTADO_ARR[x.estado]) + '</a>' +
-      '<a class="row" href="#/u/' + x.otro.id + '" style="margin-top:10px;color:var(--ink)">' + avatar(x.otro, 'xs') + '<span class="small"><b>' + nombreCon(x.otro) + '</b> · ' + estrellas(x.otro.calif) + '</span></a>' +
-      (x.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px;margin:8px 0 0">“' + esc(x.nota) + '”</p>' : '') +
-      '<div class="row wrap" style="margin-top:10px">' + b.join('') + '</div></div>';
+
+  async function vPublicados(T) {
+    const a = Api.cuenta, r = await Api.rpc('mis_estacionamientos');
+    T.innerHTML = '<div class="row between"><span class="muted small">Usas ' + r.length + ' de ' + a.lim.publicar + ' publicaciones</span><a class="btn small" href="#/publicar">' + ico('plus') + ' Publicar</a></div>' +
+      '<div class="barra"><i style="width:' + Math.min(100, r.length / Math.max(1, a.lim.publicar) * 100) + '%"></i></div>' +
+      (!Api.puede('destacado') ? '<a class="aviso" style="display:block;margin:10px 0;color:var(--ink)" href="#/premium">⭐ <b>Premium:</b> publica más, pin dorado destacado y estadísticas.</a>' : '') +
+      (r.length ? r.map((e) => '<div class="card" style="margin-top:10px"><a class="row" href="#/e/' + e.id + '" style="color:var(--ink)">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div>' +
+          '<div style="margin-top:4px">' + pill(ESTADO_EST[e.estado]) + (!e.visible ? ' <span class="pill warn">No visible: supera tu plan</span>' : '') + '</div></div></a>' +
+          (e.stats ? '<div class="row small muted" style="margin-top:8px;gap:14px">' + ico('eye') + ' ' + e.stats.vistas + ' visitas · ❤️ ' + e.stats.favoritos + ' · 📩 ' + e.stats.solicitudes + ' reservas</div>'
+            : '<div class="small muted" style="margin-top:8px">📊 Estadísticas: <a href="#/premium">solo Premium</a></div>') +
+          '<div class="row" style="margin-top:10px"><select data-est="' + e.id + '" class="grow"' + (e.estado === 'oculto' ? ' disabled' : '') + '>' + ['disponible', 'ocupado', 'pausado'].map((s) => '<option value="' + s + '"' + (e.estado === s ? ' selected' : '') + '>' + ESTADO_EST[s][1] + '</option>').join('') + '</select>' +
+          '<a class="btn sec small" href="#/editar/' + e.id + '">' + ico('edit') + ' Editar</a></div></div>').join('')
+        : '<div class="vacio">' + ico('car') + '<p>¿Tienes un estacionamiento sin usar? Publícalo y gana plata extra.</p><a class="btn" href="#/publicar">Publicar ahora</a></div>');
+    U.ponerIconos(T);
+    T.onchange = async (ev) => {
+      const s = ev.target.closest('[data-est]'); if (!s) return;
+      try { await Api.rpc('estado_estacionamiento', { p_id: s.dataset.est, p_estado: s.value }); toast('Estado actualizado'); g.Mapa.recargar(); } catch (er) { fallo(er); }
+    };
   }
-  async function accionArriendo(ev, tab) {
-    const b = ev.target.closest('[data-a]'); if (!b) return;
-    const a = b.dataset.a, id = b.dataset.id;
-    try {
-      if (a === 'chat') return contactar(b.dataset.u);
-      if (a === 'aceptar') { if (!await confirmar('¿Aceptar esta solicitud? La persona verá la dirección exacta.', 'Aceptar')) return; await Api.rpc('responder_arriendo', { p_id: id, p_aceptar: true }); toast('Aceptado ✅'); }
-      if (a === 'rechazar') { if (!await confirmar('¿Rechazar esta solicitud?', 'Rechazar', true)) return; await Api.rpc('responder_arriendo', { p_id: id, p_aceptar: false }); toast('Rechazada'); }
-      if (a === 'finalizar') { if (!await confirmar('¿Marcar este arriendo como finalizado?', 'Finalizar')) return; await Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'finalizar' }); toast('Finalizado. ¡Ahora califica! ⭐'); }
-      if (a === 'cancelar') { if (!await confirmar('¿Cancelar este arriendo?', 'Sí, cancelar', true)) return; await Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'cancelar' }); toast('Cancelado'); }
-      if (a === 'calificar') return calificar(id, b.dataset.n, tab);
-      Api.empujar(); await Api.refrescar(); g.Mapa.recargar(); vMis(tab); contadores();
-    } catch (e) { fallo(e); }
+
+  async function vFavoritos(T) {
+    const r = await Api.rpc('mis_favoritos'), a = Api.cuenta;
+    T.innerHTML = '<p class="muted small">' + r.length + ' de ' + (a.lim.favoritos >= 500 ? 'ilimitados' : a.lim.favoritos) + ' favoritos</p>' +
+      (r.length ? r.map((e) => '<a class="item" href="#/e/' + e.id + '">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div></div>' + (e.estado !== 'disponible' ? pill(ESTADO_EST[e.estado]) : '') + '</a>').join('')
+        : '<div class="vacio">' + ico('heart') + '<p>Guarda estacionamientos con ❤️ para encontrarlos rápido.</p></div>');
+    U.ponerIconos(T);
+  }
+
+  // 2 espacios de link de pago, uno activo. Lo que pagan tus arrendatarios llega directo a ti.
+  async function vLinks(T) {
+    const l = await Api.rpc('mis_links');
+    T.innerHTML = '<div class="card"><b>💳 Tus links de pago</b><p class="small muted" style="margin:6px 0 0">Tus arrendatarios pagan con el link <b>activo</b> y suben el comprobante; tú apruebas. ' +
+      'Tienes 2 espacios (por ejemplo Mercado Pago y transferencia) y eliges cuál se usa. Si pones un <b>abono</b>, se cobra solo eso para confirmar y el resto se paga al llegar. Solo tú ves estos datos.</p></div>' +
+      l.map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '"><div class="row between"><b>Espacio ' + s.slot + '</b>' +
+        '<label class="check" style="margin:0"><input type="radio" name="lkAct"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
+        '<label>Link de pago (Mercado Pago u otro)</label><input class="lkUrl" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
+        '<label>Abono fijo para confirmar (opcional, $)</label><input class="lkMonto" type="number" inputmode="numeric" min="0" step="500" placeholder="Vacío = paga el total" value="' + (s.monto || '') + '">' +
+        '<label>Texto o datos de transferencia (opcional)</label><textarea class="lkTxt" maxlength="300" placeholder="Ej: Banco Estado, cuenta RUT 12.345.678-9">' + esc(s.texto) + '</textarea>' +
+        '<button class="btn block lkOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
+    T.onclick = async (ev) => {
+      const b = ev.target.closest('.lkOk'); if (!b) return;
+      const c = b.closest('[data-slot]');
+      try {
+        await Api.rpc('guardar_link', { p_slot: +c.dataset.slot, p_monto: +c.querySelector('.lkMonto').value || 0, p_url: c.querySelector('.lkUrl').value,
+          p_texto: c.querySelector('.lkTxt').value, p_activo: c.querySelector('input[type=radio]').checked });
+        toast('Guardado'); Api.refrescar(); vLinks(T);
+      } catch (er) { fallo(er); }
+    };
+  }
+
+  async function vEstadisticas(T) {
+    if (!Api.puede('estadisticas')) {
+      T.innerHTML = '<div class="card center"><div style="font-size:44px">📊</div><h2>Estadísticas Premium</h2><p class="muted">Visitas, reservas e ingresos por mes de tus estacionamientos.</p><a class="btn gold" href="#/premium">Ver Premium</a></div>';
+      return;
+    }
+    const s = await Api.rpc('mis_estadisticas');
+    const max = Math.max(1, ...s.meses.map((m) => m.ingresos));
+    T.innerHTML = '<div class="kpis">' + [['Visitas', s.vistas], ['Favoritos', s.favoritos], ['Reservas (6 meses)', s.meses.reduce((t, m) => t + m.reservas, 0)], ['Canceladas', s.canceladas]]
+      .map((k) => '<div class="kpi"><b>' + k[1] + '</b><small>' + k[0] + '</small></div>').join('') + '</div>' +
+      '<div class="card" style="margin-top:12px"><b>Ingresos por mes</b><div class="barras" style="margin-top:12px">' + s.meses.map((m) => '<div title="' + esc(m.mes) + ': ' + clp(m.ingresos) + '" style="height:' + Math.max(2, m.ingresos / max * 100) + '%"></div>').join('') + '</div>' +
+      '<div class="row between small muted">' + s.meses.map((m) => '<span>' + esc(m.mes) + '</span>').join('') + '</div>' +
+      '<table class="tabla" style="margin-top:10px">' + s.meses.map((m) => '<tr><td>' + esc(m.mes) + '</td><td>' + m.reservas + ' reservas</td><td><b>' + clp(m.ingresos) + '</b></td></tr>').join('') + '</table></div>';
   }
   function calificar(id, nombre, tab) {
     let n = 5;
@@ -380,7 +534,7 @@
     const pintar = () => { c.querySelector('#cEst').innerHTML = '★'.repeat(n) + '<span style="color:var(--line)">' + '★'.repeat(5 - n) + '</span>'; };
     c.querySelector('#cEst').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); n = Math.min(5, Math.max(1, Math.ceil((e.clientX - r.left) / r.width * 5))); pintar(); };
     c.querySelector('#cOk').onclick = async () => {
-      try { await Api.rpc('calificar', { p_arriendo: id, p_estrellas: n, p_comentario: c.querySelector('#cCom').value }); cerrarModal(); toast('¡Gracias por calificar!'); vMis(tab); } catch (e) { toast(e.message); }
+      try { await Api.rpc('calificar', { p_arriendo: id, p_estrellas: n, p_comentario: c.querySelector('#cCom').value }); cerrarModal(); toast('¡Gracias por calificar!'); if (typeof tab === 'function') tab(); else vReservas(); } catch (e) { toast(e.message); }
     };
   }
 
@@ -470,16 +624,17 @@
     const dias = Math.max(0, Math.ceil((new Date(a.premium_hasta) - Date.now()) / 864e5));
     return '<span class="pill gold">⭐ ' + (a.plan_origen === 'prueba' ? 'Prueba Premium' : 'Premium') + ' · ' + (dias <= 1 ? 'último día' : dias + ' días') + '</span>';
   }
-  async function vCuenta() {
+  async function vCuenta(T) {
+    T = T || V;
     await Api.refrescar();
     const a = Api.cuenta; if (!a) { router(); return; }
     const ver = a.verificado ? '<span class="pill ok">' + ico('shield') + ' Verificado</span>'
       : a.verif_estado === 'pendiente' ? '<span class="pill warn">🕐 Verificación en revisión</span>'
         : '<a class="pill bad" href="#/verificar">Sin verificar · Verificar ahora</a>';
     const tema = document.documentElement.dataset.theme || '';
-    V.innerHTML = '<div class="card"><div class="row">' + avatar(a, 'lg') + '<div class="grow"><h2 style="margin:0">' + nombreCon(a) + '</h2><div class="small muted ell">' + esc(a.email) + '</div>' +
+    T.innerHTML = '<div class="card"><div class="row">' + avatar(a, 'lg') + '<div class="grow"><h2 style="margin:0">' + nombreCon(a) + '</h2><div class="small muted ell">' + esc(a.email) + '</div>' +
       '<div class="row wrap" style="margin-top:6px">' + planTxt(a) + ver + '</div></div></div>' +
-      '<div class="row" style="margin-top:12px"><a class="btn sec grow" href="#/perfil">' + ico('edit') + ' Editar perfil</a><a class="btn sec" href="#/u/' + a.id + '" aria-label="Ver mi perfil">' + ico('eye') + '</a><button class="btn sec" id="cQR" aria-label="Mi QR">' + ico('qr') + '</button></div></div>' +
+      '<div class="row" style="margin-top:12px"><a class="btn sec grow" href="#/mas/perfil">' + ico('edit') + ' Editar perfil</a><a class="btn sec" href="#/u/' + a.id + '" aria-label="Ver mi perfil">' + ico('eye') + '</a><button class="btn sec" id="cQR" aria-label="Mi QR">' + ico('qr') + '</button></div></div>' +
       (a.suspendido ? '<div class="aviso bad" style="margin-top:12px">Tu cuenta está suspendida. Escribe a soporte.</div>' : '') +
       (!a.verificado && a.verif_estado === 'rechazada' ? '<div class="aviso bad" style="margin-top:12px">Tu verificación fue rechazada: ' + esc(a.verif_motivo || '') + '. <a href="#/verificar">Enviar de nuevo</a></div>' : '') +
       (a.admin ? '<a class="btn dark block" style="margin-top:12px" href="#/admin">' + ico('server') + ' Panel de administración</a>' : '') +
@@ -487,7 +642,7 @@
       '<div class="row between small"><span>Estacionamientos publicados</span><b>' + a.uso.publicados + ' / ' + a.lim.publicar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.publicados / a.lim.publicar * 100) + '%"></i></div>' +
       '<div class="row between small" style="margin-top:10px"><span>Arriendos activos</span><b>' + a.uso.arrendando + ' / ' + a.lim.arrendar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.arrendando / a.lim.arrendar * 100) + '%"></i></div>' +
       (a.admin ? '' : '<a class="btn ' + (a.premium ? 'sec' : 'gold') + ' block" style="margin-top:14px" href="#/premium">' + (a.premium ? 'Ver mi Premium' : '⭐ Hazte Premium') + '</a>') + '</div>' +
-      '<div class="sec-tit">Alerta de zona ' + (a.premium ? '' : '<span class="pill gold">Premium</span>') + '</div><div class="card' + (a.premium ? '' : ' candado') + '">' +
+      '<div class="sec-tit">Alerta de zona ' + (Api.puede('alertas') ? '' : '<span class="pill gold">Premium</span>') + '</div><div class="card' + (Api.puede('alertas') ? '' : ' candado') + '">' +
       '<p class="small" style="margin-top:0">Te avisamos cuando publiquen un estacionamiento cerca de la zona que elijas.</p>' +
       (a.alerta ? '<p class="small"><b>Activa:</b> radio de ' + a.alerta.km + ' km.</p>' : '') +
       '<div class="row"><select id="aKm" class="grow"><option value="0.5">500 m</option><option value="1">1 km</option><option value="2">2 km</option><option value="5">5 km</option></select>' +
@@ -495,24 +650,26 @@
       '<div class="sec-tit">Ajustes</div><div class="card stack">' +
       '<div class="row between"><span>' + ico('bell') + ' Notificaciones en este celular</span><button class="btn small sec" id="cPush">Activar</button></div>' +
       '<div class="row between"><span>🌓 Apariencia</span><select id="cTema" style="width:auto"><option value="">Automática</option><option value="light">Clara</option><option value="dark">Oscura</option></select></div>' +
+      '<div class="row between"><span>🔄 Versión ' + esc(cfg.VERSION) + '</span><button class="btn small sec" id="cAct">Buscar actualización</button></div>' +
       '<div class="row between" id="cInstWrap" hidden><span>' + ico('download') + ' Instalar la app</span><button class="btn small" id="cInst">Instalar</button></div></div>' +
       '<div class="sec-tit">Ayuda</div><div class="card stack"><a href="#/chat" id="cSop" class="row" style="color:var(--ink)">' + ico('help') + ' Soporte (chat)</a>' +
       '<a href="#/legal" class="row" style="color:var(--ink)">' + ico('shield') + ' Términos y privacidad</a>' +
       '<button class="row btn line" id="cSalir" style="justify-content:flex-start">' + ico('logout') + ' Cerrar sesión</button></div>' +
       (a.admin ? '' : '<button class="btn line block small" id="cBorrar" style="margin-top:20px;color:var(--bad)">Eliminar mi cuenta y mis datos</button>') +
       '<p class="pie">© ' + new Date().getFullYear() + ' ' + esc(cfg.MARCA) + ' · ' + esc(cfg.AUTOR) + '<br>Versión ' + esc(cfg.VERSION) + '</p>';
-    U.ponerIconos(V);
+    U.ponerIconos(T);
     $('cTema').value = tema;
+    $('cAct').onclick = () => buscarVersion(true);
     $('cTema').onchange = (e) => { U.aplicarTema(e.target.value); location.reload(); };
-    $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', U.enlace('#/u/' + a.id), a.premium ? a.color : '#000');
+    $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', U.enlace('#/u/' + a.id), Api.puede('qr_color') ? a.color : '#000');
     if (a.alerta) $('aKm').value = String(a.alerta.km);
     $('aSet').onclick = async () => {
-      if (!a.premium) { location.hash = '#/premium'; return; }
+      if (!Api.puede('alertas')) { location.hash = '#/premium'; return; }
       const c = JSON.parse(sessionStorage.getItem('est:vista') || 'null');
       const ll = c ? c.c : { lat: cfg.CENTRO[0], lng: cfg.CENTRO[1] };
-      try { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: ll.lat, p_lng: ll.lng, p_km: +$('aKm').value })); toast('Alerta activada en la zona que estabas viendo en el mapa'); vCuenta(); } catch (e) { fallo(e); }
+      try { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: ll.lat, p_lng: ll.lng, p_km: +$('aKm').value })); toast('Alerta activada en la zona que estabas viendo en el mapa'); vCuenta(T); } catch (e) { fallo(e); }
     };
-    if ($('aDel')) $('aDel').onclick = async () => { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: null, p_lng: null, p_km: null })); vCuenta(); };
+    if ($('aDel')) $('aDel').onclick = async () => { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: null, p_lng: null, p_km: null })); vCuenta(T); };
     U.pushActivo().then((on) => { if (on) { $('cPush').textContent = 'Activas ✓'; $('cPush').disabled = true; } });
     $('cPush').onclick = async (e) => { e.target.disabled = true; try { await U.activarPush(); e.target.textContent = 'Activas ✓'; toast('Notificaciones activadas 🔔'); } catch (er) { e.target.disabled = false; toast(er.message); } };
     if (instalar) { $('cInstWrap').hidden = false; $('cInst').onclick = () => { instalar.prompt(); instalar = null; $('cInstWrap').hidden = true; }; }
@@ -527,19 +684,22 @@
     };
   }
 
-  function vEditarPerfil() {
+  function vEditarPerfil(T) {
+    T = T || V;
     const a = Api.cuenta;
     const st = { color: a.color, icono: a.icono || '', avatar: a.avatar, file: null };
-    V.innerHTML = volver() + '<h1>Editar perfil</h1><div class="card"><div class="row"><span id="ePrev"></span><div class="grow"><button class="btn sec small" id="eFoto">' + ico('cam') + ' Cambiar foto</button>' +
+    const libre = Api.puede('color_libre');
+    T.innerHTML = '<div class="card"><div class="row"><span id="ePrev"></span><div class="grow"><button class="btn sec small" id="eFoto">' + ico('cam') + ' Cambiar foto</button>' +
       (a.avatar ? ' <button class="btn line small" id="eQuitar">Quitar foto</button>' : '') + '<input type="file" id="eFile" accept="image/*" hidden></div></div>' +
       '<label>O elige un ícono</label><div class="iconos" id="eIcos">' + ICONOS.map((i) => '<button type="button" data-ic="' + i + '">' + i + '</button>').join('') + '</div>' +
-      '<label>Nombre</label><input id="eNom" maxlength="60" value="' + esc(a.nombre) + '"><label>Comuna</label><input id="eCom" maxlength="40" value="' + esc(a.comuna || '') + '">' +
+      '<label>Nombre</label><input id="eNom" maxlength="60" value="' + esc(a.nombre) + '">' +
+      '<label>WhatsApp (solo lo ve quien tiene una reserva contigo)</label><input id="eWsp" type="tel" inputmode="tel" maxlength="20" placeholder="+56 9 1234 5678" value="' + esc(a.whatsapp || '') + '"><label>Comuna</label><input id="eCom" maxlength="40" value="' + esc(a.comuna || '') + '">' +
       '<label>Sobre mí</label><textarea id="eBio" maxlength="280" placeholder="Cuéntale a la comunidad quién eres">' + esc(a.bio || '') + '</textarea>' +
       '<label>Color del perfil</label><div class="colores" id="eCols">' + COLORES_GRATIS.map((c) => '<button type="button" class="color-op" title="' + c[0] + '" data-c="' + c[1] + '" style="background:' + c[1] + '"></button>').join('') + '</div>' +
-      '<div class="' + (a.premium ? '' : 'candado') + '" style="margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:12px"><div class="row"><input type="color" id="eRGB" value="' + esc(a.color) + '"' + (a.premium ? '' : ' disabled') + '>' +
-      '<div><b>Color libre (RGB)</b><div class="small muted">' + (a.premium ? 'Elige cualquier color.' : 'Cualquier color que quieras con <a href="#/premium">Premium</a>.') + '</div></div></div></div>' +
+      '<div class="' + (libre ? '' : 'candado') + '" style="margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:12px"><div class="row"><input type="color" id="eRGB" value="' + esc(a.color) + '"' + (libre ? '' : ' disabled') + '>' +
+      '<div><b>Color libre (RGB)</b><div class="small muted">' + (libre ? 'Elige cualquier color.' : 'Cualquier color que quieras con <a href="#/premium">Premium</a>.') + '</div></div></div></div>' +
       '<button class="btn block" id="eOk" style="margin-top:16px">Guardar</button></div>';
-    U.ponerIconos(V);
+    U.ponerIconos(T);
     const prev = () => {
       $('ePrev').innerHTML = st.file ? '<span class="av lg"><img src="' + URL.createObjectURL(st.file) + '"></span>' : avatar({ nombre: $('eNom').value, avatar: st.avatar, icono: st.icono, color: st.color, premium: a.premium }, 'lg');
       $('eIcos').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.ic === st.icono));
@@ -556,8 +716,8 @@
       e.target.disabled = true;
       try {
         if (st.file) { e.target.textContent = 'Subiendo foto…'; st.avatar = await U.subirFoto(st.file, 'fotos', { lado: 320, calidad: 0.78, cuadrado: true }); }
-        Api.guardar(await Api.rpc('guardar_perfil', { p_nombre: $('eNom').value, p_comuna: $('eCom').value, p_bio: $('eBio').value, p_icono: st.icono, p_color: st.color, p_avatar: st.avatar }));
-        Api.empujar(); toast('Perfil guardado'); location.hash = '#/cuenta';
+        Api.guardar(await Api.rpc('guardar_perfil', { p_nombre: $('eNom').value, p_comuna: $('eCom').value, p_bio: $('eBio').value, p_icono: st.icono, p_color: st.color, p_avatar: st.avatar, p_whatsapp: $('eWsp').value }));
+        Api.empujar(); toast('Perfil guardado'); vEditarPerfil(T);
       } catch (er) { U.aplicarColor(a.color); fallo(er); e.target.disabled = false; e.target.textContent = 'Guardar'; }
     };
   }
@@ -601,36 +761,45 @@
   }
 
   /* ======================= Premium ======================= */
-  async function vPremium() {
-    const aj = await ajustesPub(), a = Api.cuenta;
-    const meses = +aj.meses_por_pago;
-    const filas = [['Publicar estacionamientos', '1', '10'], ['Arriendos activos a la vez', '1', '10'], ['Fotos por estacionamiento', '3', '8'], ['Favoritos', '3', 'Ilimitados'],
-      ['Pin dorado destacado en el mapa', '—', '✓'], ['Aparecer primero en la lista', '—', '✓'], ['Estadísticas (visitas, solicitudes)', '—', '✓'], ['Alerta "nuevo estacionamiento cerca"', '—', '✓'],
-      ['Color libre del perfil (RGB)', '6 colores', 'Cualquiera'], ['QR con tu color', '—', '✓'], ['Sello PRO y marco dorado', '—', '✓']];
-    V.innerHTML = volver() + '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>Estaciona Premium</h1>' +
-      '<p style="opacity:.85">Publica más, destaca en el mapa y arrienda sin límites.</p><div style="font-size:34px;font-weight:900">' + clp(aj.precio || 4900) + '</div>' +
-      '<div class="small" style="opacity:.8">Pago único · ' + (meses === 0 ? 'Premium de por vida' : meses + (meses === 1 ? ' mes' : ' meses') + ' de Premium') + '</div></div>' +
+  async function vPremium(T) {
+    T = T || V;
+    const aj = await Api.ajustes(true), a = Api.cuenta;
+    const pl = aj.planes || {}, gr = (pl.gratis || {}).limites || {}, pr = (pl.premium || {}).limites || {};
+    const dur = (pl.premium || {}).duracion_dias || 30;
+    const v = (x) => x === true ? '✓' : x === false || x == null ? '—' : x >= 500 ? 'Ilimitados' : x;
+    const filas = [['Estacionamientos publicados', 'publicar'], ['Arriendos activos a la vez', 'arrendar'], ['Fotos por estacionamiento', 'fotos'], ['Favoritos', 'favoritos'],
+      ['Pin dorado destacado', 'destacado'], ['Estadísticas', 'estadisticas'], ['Alerta de zona', 'alertas'], ['Color libre (RGB)', 'color_libre'], ['QR con tu color', 'qr_color']];
+    T.innerHTML = '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>' + esc(Api.texto('premium_titulo', 'Estaciona Premium')) + '</h1>' +
+      '<p style="opacity:.85">' + esc(Api.texto('premium_texto', '')) + '</p><div style="font-size:34px;font-weight:900">' + clp(aj.precio || 0) + '</div>' +
+      '<div class="small" style="opacity:.8">' + dur + ' días de Premium' + (aj.texto_pago ? ' · ' + esc(aj.texto_pago) : '') + '</div></div>' +
       (a && a.premium && !a.admin ? '<div class="aviso" style="margin-top:12px">' + planTxt(a) + (a.premium_hasta && !/infinity/i.test(String(a.premium_hasta)) ? ' Vence el ' + fecha(a.premium_hasta) + '.' : '') + '</div>' : '') +
-      '<table class="tabla card" style="margin-top:12px;padding:0"><tr><th></th><th>Gratis</th><th style="color:var(--gold)">Premium</th></tr>' +
-      filas.map((f) => '<tr><td>' + f[0] + '</td><td>' + f[1] + '</td><td><b>' + f[2] + '</b></td></tr>').join('') + '</table>' +
-      '<div class="stack" style="margin-top:14px"><button class="btn gold block" id="prComprar">Comprar Premium</button><button class="btn sec block" id="prPague">Ya pagué: avisar al administrador</button></div>' +
-      '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>' +
-      '<p class="small muted" style="margin-top:14px">Cuando pagues, el administrador activa tu Premium o te entrega una key para activarlo aquí.</p>';
-    U.ponerIconos(V);
+      '<div class="card" style="margin-top:12px"><b>Incluye</b><ul class="small" style="margin:8px 0 0;padding-left:18px">' + ((pl.premium || {}).beneficios || []).map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' +
+      '<table class="tabla card" style="margin-top:12px;padding:0"><tr><th></th><th>' + esc((pl.gratis || {}).nombre || 'Gratis') + '</th><th style="color:var(--gold)">' + esc((pl.premium || {}).nombre || 'Premium') + '</th></tr>' +
+      filas.map((f) => '<tr><td>' + f[0] + '</td><td>' + v(gr[f[1]]) + '</td><td><b>' + v(pr[f[1]]) + '</b></td></tr>').join('') + '</table>' +
+      '<div class="card" style="margin-top:12px"><b>Cómo activarlo</b><p class="small muted" style="margin:6px 0 10px">' + esc(Api.texto('pago_instrucciones', '')) + '</p>' +
+      '<button class="btn gold block" id="prComprar">💳 Pagar ' + clp(aj.precio || 0) + '</button>' +
+      '<label>Foto del comprobante</label><input type="file" id="prComp" accept="image/*"><input id="prNota" placeholder="Nota (opcional): nombre de quien pagó" maxlength="200" style="margin-top:8px">' +
+      '<button class="btn block" id="prPague" style="margin-top:10px">📤 Enviar comprobante</button></div>' +
+      '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>';
+    U.ponerIconos(T);
     $('prComprar').onclick = () => {
       if (!Api.logueado()) return pedirLogin('Crea tu cuenta para comprar Premium');
       if (!aj.link_pago) { toast('El link de pago estará disponible pronto. Escribe a soporte.'); return; }
       window.open(aj.link_pago, '_blank', 'noopener');
     };
-    $('prPague').onclick = async () => {
+    $('prPague').onclick = async (e) => {
       if (!Api.logueado()) return pedirLogin();
-      const nota = await U.pedirTexto('Avisar mi pago', 'Ej: Pagué con Mercado Pago a nombre de Camila Rojas', 'Avisar');
-      if (nota == null) return;
-      try { await Api.rpc('ya_pague', { p_nota: nota }); Api.empujar(); toast('¡Aviso enviado! Te activaremos pronto'); } catch (e) { toast(e.message); }
+      const f = $('prComp').files[0]; if (!f) { toast('Sube la foto del comprobante'); return; }
+      e.target.disabled = true; e.target.textContent = 'Enviando…';
+      try {
+        const ruta = await U.subirFoto(f, 'privado', { lado: 1280, calidad: 0.7 });
+        await Api.rpc('ya_pague', { p_nota: $('prNota').value, p_comprobante: ruta }); Api.empujar(); toast('¡Comprobante enviado! Te avisamos al aprobarlo');
+      } catch (er) { toast(er.message); }
+      e.target.disabled = false; e.target.textContent = '📤 Enviar comprobante';
     };
     $('prCanje').onclick = async () => {
       if (!Api.logueado()) return pedirLogin();
-      try { Api.guardar(await Api.rpc('canjear_key', { p_key: $('prKey').value })); toast('¡Premium activado! ⭐'); vPremium(); } catch (e) { toast(e.message); }
+      try { Api.guardar(await Api.rpc('canjear_key', { p_key: $('prKey').value })); toast('¡Premium activado! ⭐'); vPremium(T); } catch (e) { toast(e.message); }
     };
   }
 
@@ -679,25 +848,30 @@
   /* ======================= Router ======================= */
   const RUTAS = [
     [/^\/?$/, 'mapa', null, false],
-    [/^\/e\/([0-9a-f-]{36})$/, 'mapa', vDetalle, 'Crea tu cuenta para ver los detalles y arrendar'],
+    [/^\/e\/([0-9a-f-]{36})$/, 'mapa', vDetalle, false],
     [/^\/u\/([0-9a-f-]{36})$/, '', vPerfil, 'Crea tu cuenta para ver perfiles'],
     [/^\/publicar$/, 'publicar', () => vPublicar(), 'Crea tu cuenta para publicar tu estacionamiento'],
     [/^\/editar\/([0-9a-f-]{36})$/, 'publicar', vPublicar, true],
-    [/^\/mis(?:\/(\w+))?$/, 'mis', vMis, 'Crea tu cuenta para arrendar o publicar'],
+    [/^\/r\/([0-9a-f-]{36})$/, 'reservas', vReserva, 'Ingresa para ver tu reserva'],
+    [/^\/reservas(?:\/(\w+))?$/, 'reservas', vReservas, 'Crea tu cuenta para reservar o publicar'],
+    [/^\/mas(?:\/(\w+))?$/, 'mas', vMas, 'Ingresa o crea tu cuenta'],
     [/^\/chat$/, 'chat', vChats, 'Crea tu cuenta para chatear'],
     [/^\/chat\/([0-9a-f-]{36})$/, 'chat', vConversacion, true],
-    [/^\/cuenta$/, 'cuenta', vCuenta, 'Ingresa o crea tu cuenta'],
-    [/^\/perfil$/, 'cuenta', vEditarPerfil, true],
-    [/^\/verificar$/, 'cuenta', vVerificar, 'Crea tu cuenta para verificarte'],
-    [/^\/premium$/, 'cuenta', vPremium, false],
+    [/^\/verificar$/, 'mas', vVerificar, 'Crea tu cuenta para verificarte'],
+    [/^\/premium$/, 'mas', (t) => vPremium(), false],
     [/^\/avisos$/, '', vAvisos, true],
     [/^\/legal$/, '', vLegal, false],
-    [/^\/admin(?:\/(\w+))?$/, 'cuenta', (t) => g.Admin.vista(t), true]
+    [/^\/admin(?:\/(\w+))?$/, 'mas', (t) => g.Admin.vista(t), true]
   ];
+  // Direcciones antiguas (avisos y enlaces de la v1).
+  const ALIAS = { '/cuenta': '/mas/cuenta', '/perfil': '/mas/perfil', '/mis': '/reservas', '/mis/publicados': '/mas/estacionamientos',
+    '/mis/favoritos': '/mas/favoritos', '/mis/solicitudes': '/reservas/revisar', '/mis/arriendos': '/reservas/mias' };
   function router() {
     clearInterval(pollChat); pollChat = null;
     g.Mapa.limpiar();
-    const h = location.hash.replace(/^#/, '');
+    const h0 = location.hash.replace(/^#/, '');
+    if (ALIAS[h0]) { location.replace('#' + ALIAS[h0]); return; }
+    const h = h0;
     let ruta = RUTAS[0], m = null;
     for (const r of RUTAS) { m = h.match(r[0]); if (m) { ruta = r; break; } }
     if (!m) { location.hash = '#/'; return; }
@@ -728,29 +902,40 @@
   window.addEventListener('hashchange', router);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) contadores(); });
 
+  // Actualizaciones: compara version.json con la versión instalada y muestra "Hay una versión nueva → Actualizar ahora".
+  let swReg = null;
+  async function actualizarAhora(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
+    try {
+      if (swReg) { await swReg.update(); if (swReg.waiting) { swReg.waiting.postMessage('saltar'); setTimeout(() => location.reload(), 4000); return; } }
+      const ks = await caches.keys();
+      await Promise.all(ks.filter((k) => k !== 'est-fotos').map((k) => caches.delete(k)));
+    } catch (e) { /* sin caché */ }
+    location.reload();
+  }
+  async function buscarVersion(manual) {
+    let v = '';
+    try { v = String((await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { if (manual) toast('Sin conexión'); return; }
+    if (!v || v === cfg.VERSION) { if (manual) toast('Ya tienes la última versión (v' + cfg.VERSION + ') ✅'); return; }
+    if (document.getElementById('upd')) return;
+    const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
+    d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><small>Tienes la v' + esc(cfg.VERSION) + ' · nueva v' + esc(v) + '</small></div><button class="btn small">Actualizar ahora</button>';
+    d.querySelector('button').onclick = (e) => actualizarAhora(e.target);
+    document.body.appendChild(d);
+  }
   function registrarSW() {
-    if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
-    navigator.serviceWorker.register('sw.js').then((reg) => {
-      const avisar = (w) => {
-        if (document.getElementById('upd')) return;
-        const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
-        d.innerHTML = '<div class="grow"><b>🔄 Nueva versión disponible</b></div><button class="btn small">Actualizar</button>';
-        d.querySelector('button').onclick = () => w.postMessage('saltar');
-        document.body.appendChild(d);
-      };
-      if (reg.waiting && navigator.serviceWorker.controller) avisar(reg.waiting);
-      reg.addEventListener('updatefound', () => {
-        const w = reg.installing;
-        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) avisar(w); });
-      });
-      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
-    }).catch(() => {});
+    if (!('serviceWorker' in navigator) || location.protocol === 'file:') { buscarVersion(); return; }
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => { swReg = reg; reg.update().catch(() => {}); }).catch(() => {});
     let recargado = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!recargado) { recargado = true; location.reload(); } });
+    buscarVersion();
+    setInterval(buscarVersion, 10 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) buscarVersion(); });
   }
 
   async function iniciar() {
     U.ponerIconos(document);
+    Api.ajustes();
     $('btnEntrar').onclick = () => vLogin('', 'in');
     cabecera();
     Api.sb.auth.onAuthStateChange((ev) => {

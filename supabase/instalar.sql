@@ -237,23 +237,10 @@ create policy "est fotos subir" on storage.objects for insert to authenticated
 drop policy if exists "est fotos borrar" on storage.objects;
 create policy "est fotos borrar" on storage.objects for delete to authenticated
   using (bucket_id in ('fotos', 'privado') and (storage.foldername(name))[1] = auth.uid()::text);
-drop policy if exists "est privado ver" on storage.objects;
-create policy "est privado ver" on storage.objects for select to authenticated
-  using (bucket_id = 'privado' and ((storage.foldername(name))[1] = auth.uid()::text
-    or public.es_admin()));
 
 create or replace function public._premium(p public.perfiles) returns boolean
 language sql stable as $$ select p.es_admin or coalesce(p.premium_hasta > now(), false) $$;
 
-create or replace function public._lim(p public.perfiles, que text) returns int
-language sql stable as $$
-  select case que
-    when 'publicar' then case when public._premium(p) then 10 else 1 end
-    when 'arrendar' then case when public._premium(p) then 10 else 1 end
-    when 'fotos' then case when public._premium(p) then 8 else 3 end
-    when 'favoritos' then case when public._premium(p) then 500 else 3 end
-  end
-$$;
 
 create or replace function public._yo() returns public.perfiles
 language plpgsql stable security definer set search_path = public as $$
@@ -315,13 +302,12 @@ end $$;
 -- ---------- Disparadores ----------
 create or replace function public._nuevo_usuario() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare es_adm boolean := lower(coalesce(new.email, '')) = 'juanjosuecastilloloyola@gmail.com';
 begin
   insert into public.perfiles (id, email, nombre, premium_hasta, plan_origen, es_admin, verificado, acepto_terminos)
   values (new.id, lower(coalesce(new.email, '')), left(coalesce(new.raw_user_meta_data ->> 'nombre', ''), 60),
-    now() + interval '7 days', 'prueba',
-    lower(coalesce(new.email, '')) = 'juanjosuecastilloloyola@gmail.com',
-    lower(coalesce(new.email, '')) = 'juanjosuecastilloloyola@gmail.com',
-    case when new.raw_user_meta_data ->> 'acepta' = 'si' then now() end)
+    case when public._cfg('dias_regalo') > 0 then now() + make_interval(days => public._cfg('dias_regalo')) end, 'prueba',
+    es_adm, es_adm, case when new.raw_user_meta_data ->> 'acepta' = 'si' then now() end)
   on conflict (id) do nothing;
   return new;
 end $$;
@@ -338,11 +324,8 @@ where email = 'juanjosuecastilloloyola@gmail.com';
 -- Ubicación aproximada: desplazamiento fijo de hasta ~150 m según el id.
 create or replace function public._ubicacion_pub() returns trigger
 language plpgsql as $$
-declare h1 int := hashtext(new.id::text); h2 int := hashtext(reverse(new.id::text));
 begin
-  new.lat_pub := round((new.lat + ((abs(h1) % 1000) / 1000.0 - 0.5) * 0.0027)::numeric, 5);
-  new.lng_pub := round((new.lng + ((abs(h2) % 1000) / 1000.0 - 0.5) * 0.0032)::numeric, 5);
-  new.actualizado := now();
+  new.lat_pub := new.lat; new.lng_pub := new.lng; new.actualizado := now();
   return new;
 end $$;
 drop trigger if exists est_ubicacion on public.estacionamientos;
@@ -369,6 +352,10 @@ begin
     on conflict do nothing;
   elsif tg_table_name = 'denuncias' then
     insert into public.por_borrar (ruta) values ('privado/' || old.evidencia) on conflict do nothing;
+  elsif tg_table_name in ('arriendos', 'pagos') then
+    if old.comprobante is not null and (tg_op = 'DELETE' or new.comprobante is distinct from old.comprobante) then
+      insert into public.por_borrar (ruta) values ('privado/' || old.comprobante) on conflict do nothing;
+    end if;
   end if;
   return coalesce(new, old);
 end $$;
@@ -400,76 +387,18 @@ create trigger est_alerta after insert on public.estacionamientos for each row e
 -- =====================================================================
 --  Funciones públicas (sin sesión)
 -- =====================================================================
-create or replace function public.ajustes_publicos() returns jsonb
-language sql stable security definer set search_path = public as $$
-  select jsonb_object_agg(clave, valor) from public.ajustes
-  where clave in ('precio', 'link_pago', 'meses_por_pago', 'vapid_public')
-$$;
 
 -- Pines del mapa dentro del rectángulo visible. Datos mínimos para que cargue rápido.
-create or replace function public.mapa(p_s double precision, p_w double precision, p_n double precision, p_e double precision)
-returns table (id uuid, la double precision, lo double precision, ph int, pd int, pm int, v text,
-  t boolean, h boolean, sg boolean, cg boolean, c text, f text, d boolean)
-language sql stable security definer set search_path = public as $$
-  with vis as (
-    select e.*, public._premium(p) as prem, public._lim(p, 'publicar') as lim,
-      row_number() over (partition by e.dueno order by e.creado) as n
-    from public.estacionamientos e join public.perfiles p on p.id = e.dueno
-    where e.estado = 'disponible' and not p.suspendido and (p.verificado or p.es_admin)
-  )
-  select vis.id, vis.lat_pub, vis.lng_pub, vis.precio_hora, vis.precio_dia, vis.precio_mes, vis.vehiculo,
-    vis.techado, vis.acceso24, vis.seguridad, vis.carga, vis.comuna, vis.fotos[1], vis.prem
-  from vis
-  where vis.n <= vis.lim and vis.lat_pub between p_s and p_n and vis.lng_pub between p_w and p_e
-  order by vis.prem desc, vis.creado desc
-  limit 400
-$$;
 
 -- =====================================================================
 --  Cuenta
 -- =====================================================================
-create or replace function public.mi_cuenta() returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare p public.perfiles; v public.verificaciones;
-begin
-  select * into p from public.perfiles where id = auth.uid();
-  if not found then return null; end if;
-  update public.perfiles set ultimo_acceso = now() where id = p.id and (ultimo_acceso is null or ultimo_acceso < now() - interval '1 hour');
-  select * into v from public.verificaciones where usuario = p.id;
-  return public._pj(p.id) || jsonb_build_object(
-    'email', p.email, 'premium_hasta', p.premium_hasta, 'plan_origen', p.plan_origen, 'suspendido', p.suspendido,
-    'acepto', p.acepto_terminos is not null,
-    'verif_estado', v.estado, 'verif_motivo', v.motivo,
-    'alerta', case when p.alerta_km is not null then jsonb_build_object('lat', p.alerta_lat, 'lng', p.alerta_lng, 'km', p.alerta_km) end,
-    'lim', jsonb_build_object('publicar', public._lim(p, 'publicar'), 'arrendar', public._lim(p, 'arrendar'),
-      'fotos', public._lim(p, 'fotos'), 'favoritos', public._lim(p, 'favoritos')),
-    'uso', jsonb_build_object(
-      'publicados', (select count(*) from public.estacionamientos where dueno = p.id),
-      'arrendando', (select count(*) from public.arriendos where arrendatario = p.id and estado in ('pendiente', 'aceptado')),
-      'favoritos', (select count(*) from public.favoritos where usuario = p.id)));
-end $$;
 
 create or replace function public.aceptar_terminos() returns void
 language sql security definer set search_path = public as $$
   update public.perfiles set acepto_terminos = now() where id = auth.uid()
 $$;
 
-create or replace function public.guardar_perfil(p_nombre text, p_comuna text, p_bio text, p_icono text, p_color text, p_avatar text)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare p public.perfiles := public._yo(); col text := lower(coalesce(p_color, ''));
-begin
-  if length(trim(coalesce(p_nombre, ''))) < 2 then raise exception 'Escribe tu nombre'; end if;
-  if col !~ '^#[0-9a-f]{6}$' then col := '#2563eb'; end if;
-  -- Los colores libres (RGB) son Premium; en Gratis solo los de la lista.
-  if not public._premium(p) and col <> p.color and col not in ('#2563eb', '#0f172a', '#16a34a', '#dc2626', '#7c3aed', '#ea580c') then
-    raise exception 'El color libre (RGB) es Premium. Elige uno de la lista o hazte Premium.';
-  end if;
-  if p_avatar is not null and p_avatar !~ ('^' || p.id || '/[A-Za-z0-9._-]+$') then raise exception 'Foto no válida'; end if;
-  update public.perfiles set nombre = left(trim(p_nombre), 60), comuna = left(nullif(trim(p_comuna), ''), 40),
-    bio = left(nullif(trim(p_bio), ''), 280), icono = left(nullif(p_icono, ''), 8), color = col, avatar = p_avatar
-  where id = p.id;
-  return public.mi_cuenta();
-end $$;
 
 create or replace function public.enviar_verificacion(p_rut text, p_serie text, p_frente text, p_reverso text, p_selfie text)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -493,20 +422,6 @@ begin
   return public.mi_cuenta();
 end $$;
 
-create or replace function public.perfil_publico(p_id uuid) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo();
-begin
-  if not exists (select 1 from public.perfiles where id = p_id) then raise exception 'Perfil no encontrado'; end if;
-  return public._pj(p_id) || jsonb_build_object(
-    'bloqueado', exists (select 1 from public.bloqueos where quien = yo.id and bloqueado = p_id),
-    'estacionamientos', coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna,
-        'foto', e.fotos[1], 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes) order by e.creado)
-      from public.estacionamientos e where e.dueno = p_id and e.estado in ('disponible', 'ocupado')), '[]'),
-    'opiniones', coalesce((select jsonb_agg(x) from (select jsonb_build_object('estrellas', c.estrellas, 'comentario', c.comentario,
-        'autor', a.nombre, 'fecha', c.creado) x from public.calificaciones c join public.perfiles a on a.id = c.autor
-      where c.destino = p_id order by c.creado desc limit 20) q), '[]'));
-end $$;
 
 create or replace function public.canjear_key(p_key text) returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -522,25 +437,7 @@ begin
   return public.mi_cuenta();
 end $$;
 
-create or replace function public.ya_pague(p_nota text) returns void
-language plpgsql security definer set search_path = public as $$
-declare p public.perfiles := public._yo();
-begin
-  if exists (select 1 from public.pagos where usuario = p.id and estado = 'pendiente') then
-    raise exception 'Ya avisaste tu pago. El administrador lo revisará pronto.';
-  end if;
-  insert into public.pagos (usuario, nota) values (p.id, left(p_nota, 200));
-  perform public._notificar(public._admin_id(), '💳 Aviso de pago', p.nombre || ' dice que pagó Premium', '#/admin/pagos');
-end $$;
 
-create or replace function public.guardar_alerta(p_lat double precision, p_lng double precision, p_km real) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare p public.perfiles := public._yo();
-begin
-  if p_km is not null and not public._premium(p) then raise exception 'Las alertas de zona son Premium'; end if;
-  update public.perfiles set alerta_lat = p_lat, alerta_lng = p_lng, alerta_km = least(greatest(p_km, 0.3), 20) where id = p.id;
-  return public.mi_cuenta();
-end $$;
 
 create or replace function public.guardar_push(p_endpoint text, p_p256dh text, p_auth text) returns void
 language plpgsql security definer set search_path = public as $$
@@ -555,14 +452,6 @@ language sql security definer set search_path = public as $$
   delete from public.push_subs where endpoint = p_endpoint and usuario = auth.uid()
 $$;
 
-create or replace function public.contadores() returns jsonb
-language sql stable security definer set search_path = public as $$
-  select jsonb_build_object(
-    'mensajes', (select count(*) from public.mensajes m join public.conversaciones c on c.id = m.conv
-      where (c.a = auth.uid() or c.b = auth.uid()) and m.autor <> auth.uid() and not m.visto),
-    'avisos', (select count(*) from public.notificaciones where usuario = auth.uid() and not leida and not chat),
-    'solicitudes', (select count(*) from public.arriendos where dueno = auth.uid() and estado = 'pendiente'))
-$$;
 
 create or replace function public.mis_notificaciones() returns jsonb
 language sql stable security definer set search_path = public as $$
@@ -647,46 +536,7 @@ begin
   delete from public.estacionamientos where id = p_id and (dueno = yo.id or yo.es_admin);
 end $$;
 
-create or replace function public.estacionamiento_detalle(p_id uuid) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); e public.estacionamientos; acceso boolean; visible boolean; arr jsonb;
-begin
-  select * into e from public.estacionamientos where id = p_id;
-  if not found or (e.estado = 'oculto' and e.dueno <> yo.id and not yo.es_admin) then
-    raise exception 'Este estacionamiento ya no está disponible';
-  end if;
-  acceso := e.dueno = yo.id or yo.es_admin or exists (select 1 from public.arriendos a
-    where a.estacionamiento = p_id and a.arrendatario = yo.id and a.estado in ('aceptado', 'finalizado'));
-  select (r.n <= public._lim(p, 'publicar')) into visible from (
-    select x.id, row_number() over (order by x.creado) n from public.estacionamientos x where x.dueno = e.dueno) r
-    join public.perfiles p on p.id = e.dueno where r.id = p_id;
-  if e.dueno <> yo.id then update public.estacionamientos set vistas = vistas + 1 where id = p_id; end if;
-  select jsonb_build_object('id', a.id, 'estado', a.estado, 'modalidad', a.modalidad) into arr from public.arriendos a
-  where a.estacionamiento = p_id and a.arrendatario = yo.id and a.estado in ('pendiente', 'aceptado') order by a.creado desc limit 1;
-  return jsonb_build_object('id', e.id, 'titulo', e.titulo, 'descripcion', e.descripcion, 'comuna', e.comuna,
-    'lat', case when acceso then e.lat else e.lat_pub end, 'lng', case when acceso then e.lng else e.lng_pub end,
-    'exacta', acceso, 'direccion', case when acceso then e.direccion end,
-    'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'vehiculo', e.vehiculo, 'techado', e.techado,
-    'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
-    'visible', coalesce(visible, false), 'creado', e.creado, 'mio', e.dueno = yo.id,
-    'vistas', case when e.dueno = yo.id or yo.es_admin then e.vistas end,
-    'favorito', exists (select 1 from public.favoritos f where f.usuario = yo.id and f.estacionamiento = p_id),
-    'mi_arriendo', arr, 'dueno', public._pj(e.dueno));
-end $$;
 
-create or replace function public.mis_estacionamientos() returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); prem boolean := public._premium(yo); lim int := public._lim(yo, 'publicar');
-begin
-  return coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1],
-      'estado', e.estado, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'visible', r.n <= lim,
-      'stats', case when prem then jsonb_build_object('vistas', e.vistas,
-        'favoritos', (select count(*) from public.favoritos f where f.estacionamiento = e.id),
-        'solicitudes', (select count(*) from public.arriendos a where a.estacionamiento = e.id)) end) order by e.creado)
-    from public.estacionamientos e
-    join (select id, row_number() over (order by creado) n from public.estacionamientos where dueno = yo.id) r on r.id = e.id
-    where e.dueno = yo.id), '[]');
-end $$;
 
 create or replace function public.favorito(p_id uuid) returns boolean
 language plpgsql security definer set search_path = public as $$
@@ -714,90 +564,9 @@ $$;
 -- =====================================================================
 --  Arriendos
 -- =====================================================================
-create or replace function public.solicitar_arriendo(p_id uuid, p_modalidad text, p_desde date, p_nota text) returns uuid
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); e public.estacionamientos; nid uuid;
-begin
-  perform public._verificado(yo);
-  select * into e from public.estacionamientos where id = p_id;
-  if not found or e.estado <> 'disponible' then raise exception 'Este estacionamiento no está disponible ahora'; end if;
-  if e.dueno = yo.id then raise exception 'Es tu propio estacionamiento'; end if;
-  if (p_modalidad = 'hora' and e.precio_hora is null) or (p_modalidad = 'dia' and e.precio_dia is null)
-    or (p_modalidad = 'mes' and e.precio_mes is null) or p_modalidad not in ('hora', 'dia', 'mes') then
-    raise exception 'Este estacionamiento no se arrienda de esa forma';
-  end if;
-  if exists (select 1 from public.bloqueos where (quien = e.dueno and bloqueado = yo.id) or (quien = yo.id and bloqueado = e.dueno)) then
-    raise exception 'No puedes contactar a esta persona';
-  end if;
-  if exists (select 1 from public.arriendos where estacionamiento = p_id and arrendatario = yo.id and estado in ('pendiente', 'aceptado')) then
-    raise exception 'Ya tienes una solicitud activa para este estacionamiento';
-  end if;
-  if (select count(*) from public.arriendos where arrendatario = yo.id and estado in ('pendiente', 'aceptado')) >= public._lim(yo, 'arrendar') then
-    raise exception 'Tu plan permite % arriendo(s) a la vez. Hazte Premium para tener hasta 10.', public._lim(yo, 'arrendar');
-  end if;
-  insert into public.arriendos (estacionamiento, dueno, arrendatario, modalidad, desde, nota)
-  values (p_id, e.dueno, yo.id, p_modalidad, p_desde, left(p_nota, 300)) returning id into nid;
-  perform public._notificar(e.dueno, '🚗 Nueva solicitud de arriendo', yo.nombre || ' quiere arrendar "' || e.titulo || '"', '#/mis/solicitudes');
-  return nid;
-end $$;
 
-create or replace function public.responder_arriendo(p_id uuid, p_aceptar boolean) returns void
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); a public.arriendos; e public.estacionamientos; o record;
-begin
-  select * into a from public.arriendos where id = p_id for update;
-  if not found or a.dueno <> yo.id or a.estado <> 'pendiente' then raise exception 'Esta solicitud ya no está pendiente'; end if;
-  select * into e from public.estacionamientos where id = a.estacionamiento;
-  update public.arriendos set estado = case when p_aceptar then 'aceptado' else 'rechazado' end, actualizado = now() where id = p_id;
-  if p_aceptar then
-    perform public._notificar(a.arrendatario, '✅ ¡Te aceptaron el arriendo!', 'Ya puedes ver la dirección exacta de "' || e.titulo || '"', '#/e/' || e.id);
-    if a.modalidad = 'mes' then
-      update public.estacionamientos set estado = 'ocupado' where id = e.id and estado = 'disponible';
-      for o in update public.arriendos set estado = 'rechazado', actualizado = now()
-        where estacionamiento = e.id and estado = 'pendiente' and id <> p_id returning arrendatario loop
-        perform public._notificar(o.arrendatario, 'Solicitud no aceptada', '"' || e.titulo || '" ya fue arrendado', '#/mis/arriendos');
-      end loop;
-    end if;
-  else
-    perform public._notificar(a.arrendatario, 'Solicitud no aceptada', 'El dueño de "' || e.titulo || '" no aceptó tu solicitud', '#/mis/arriendos');
-  end if;
-end $$;
 
-create or replace function public.cerrar_arriendo(p_id uuid, p_accion text) returns void
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); a public.arriendos; t text; otro uuid;
-begin
-  select * into a from public.arriendos where id = p_id for update;
-  if not found or yo.id not in (a.dueno, a.arrendatario) then raise exception 'Arriendo no encontrado'; end if;
-  select titulo into t from public.estacionamientos where id = a.estacionamiento;
-  otro := case when yo.id = a.dueno then a.arrendatario else a.dueno end;
-  if p_accion = 'cancelar' and a.estado in ('pendiente', 'aceptado') then
-    update public.arriendos set estado = 'cancelado', actualizado = now() where id = p_id;
-    perform public._notificar(otro, 'Arriendo cancelado', yo.nombre || ' canceló el arriendo de "' || t || '"', '#/mis/arriendos');
-  elsif p_accion = 'finalizar' and a.estado = 'aceptado' then
-    update public.arriendos set estado = 'finalizado', actualizado = now() where id = p_id;
-    perform public._notificar(otro, '⭐ Arriendo finalizado', 'Califica tu experiencia en "' || t || '"', '#/mis/arriendos');
-  else
-    raise exception 'No se puede % este arriendo', p_accion;
-  end if;
-  if a.estado = 'aceptado' and a.modalidad = 'mes' then
-    update public.estacionamientos set estado = 'disponible' where id = a.estacionamiento and estado = 'ocupado'
-      and not exists (select 1 from public.arriendos x where x.estacionamiento = a.estacionamiento and x.estado = 'aceptado' and x.modalidad = 'mes');
-  end if;
-end $$;
 
-create or replace function public.mis_arriendos() returns jsonb
-language sql stable security definer set search_path = public as $$
-  select coalesce(jsonb_agg(jsonb_build_object('id', a.id, 'estado', a.estado, 'modalidad', a.modalidad, 'desde', a.desde,
-      'nota', a.nota, 'creado', a.creado, 'soy_dueno', a.dueno = auth.uid(),
-      'est', jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1],
-        'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes),
-      'otro', public._pj(case when a.dueno = auth.uid() then a.arrendatario else a.dueno end),
-      'calificado', exists (select 1 from public.calificaciones c where c.arriendo = a.id and c.autor = auth.uid()))
-    order by (a.estado in ('pendiente', 'aceptado')) desc, a.creado desc), '[]')
-  from public.arriendos a join public.estacionamientos e on e.id = a.estacionamiento
-  where a.dueno = auth.uid() or a.arrendatario = auth.uid()
-$$;
 
 create or replace function public.calificar(p_arriendo uuid, p_estrellas int, p_comentario text) returns void
 language plpgsql security definer set search_path = public as $$
@@ -873,37 +642,6 @@ begin
       from (select * from public.mensajes where conv = p_conv and id > coalesce(p_desde, 0) order by id desc limit 200) q), '[]'));
 end $$;
 
-create or replace function public.enviar_mensaje(p_conv uuid, p_texto text) returns bigint
-language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); c public.conversaciones; otro public.perfiles; t text := trim(coalesce(p_texto, ''));
-  seguidos int; mid bigint;
-begin
-  select * into c from public.conversaciones where id = p_conv;
-  if not found or yo.id not in (c.a, c.b) then raise exception 'Conversación no encontrada'; end if;
-  select * into otro from public.perfiles where id = case when c.a = yo.id then c.b else c.a end;
-  if t = '' then raise exception 'Escribe un mensaje'; end if;
-  if length(t) > 500 then raise exception 'Máximo 500 caracteres'; end if;
-  if not yo.es_admin then
-    if not otro.es_admin then
-      perform public._verificado(yo);
-      if exists (select 1 from public.bloqueos where (quien = otro.id and bloqueado = yo.id) or (quien = yo.id and bloqueado = otro.id)) then
-        raise exception 'No puedes escribir a esta persona (bloqueo)';
-      end if;
-    end if;
-    select count(*) into seguidos from public.mensajes where conv = p_conv and autor = yo.id
-      and id > coalesce((select max(id) from public.mensajes where conv = p_conv and autor <> yo.id), 0);
-    if seguidos >= 3 then raise exception 'Máximo 3 mensajes seguidos. Espera la respuesta 🙂'; end if;
-    if (select count(*) from public.mensajes where autor = yo.id and creado > now() - interval '1 day') >= 100 then
-      raise exception 'Llegaste al máximo de 100 mensajes por día';
-    end if;
-  end if;
-  insert into public.mensajes (conv, autor, texto) values (p_conv, yo.id, t) returning id into mid;
-  update public.conversaciones set ultimo = now(), ultimo_texto = left(t, 80), ultimo_autor = yo.id where id = p_conv;
-  if not exists (select 1 from public.bloqueos where quien = otro.id and bloqueado = yo.id) then
-    perform public._notificar(otro.id, '💬 ' || yo.nombre, t, '#/chat/' || p_conv, true);
-  end if;
-  return mid;
-end $$;
 
 create or replace function public.bloquear(p_usuario uuid, p_si boolean) returns void
 language plpgsql security definer set search_path = public as $$
@@ -947,77 +685,8 @@ begin
   if not public.es_admin() then raise exception 'Solo el administrador'; end if;
 end $$;
 
-create or replace function public.admin_resumen() returns jsonb
-language plpgsql security definer set search_path = public as $$
-begin
-  perform public._solo_admin();
-  return jsonb_build_object(
-    'usuarios', (select count(*) from public.perfiles),
-    'nuevos7', (select count(*) from public.perfiles where creado > now() - interval '7 days'),
-    'activos7', (select count(*) from public.perfiles where ultimo_acceso > now() - interval '7 days'),
-    'verificados', (select count(*) from public.perfiles where verificado),
-    'premium', (select count(*) from public.perfiles p where p.premium_hasta > now() and p.plan_origen <> 'prueba'),
-    'prueba', (select count(*) from public.perfiles p where p.premium_hasta > now() and p.plan_origen = 'prueba'),
-    'suspendidos', (select count(*) from public.perfiles where suspendido),
-    'estacionamientos', (select count(*) from public.estacionamientos),
-    'disponibles', (select count(*) from public.estacionamientos where estado = 'disponible'),
-    'arriendos_activos', (select count(*) from public.arriendos where estado = 'aceptado'),
-    'arriendos_total', (select count(*) from public.arriendos),
-    'pend_verif', (select count(*) from public.verificaciones where estado = 'pendiente'),
-    'pend_denuncias', (select count(*) from public.denuncias where estado = 'abierta'),
-    'pend_pagos', (select count(*) from public.pagos where estado = 'pendiente'),
-    'keys_libres', (select count(*) from public.licencias where canjeada_por is null and not revocada),
-    'registros', coalesce((select jsonb_agg(jsonb_build_object('d', d, 'n', n) order by d) from (
-      select g::date d, (select count(*) from public.perfiles where creado::date = g::date) n
-      from generate_series(current_date - 13, current_date, interval '1 day') g) q), '[]'),
-    'comunas', coalesce((select jsonb_agg(jsonb_build_object('c', comuna, 'n', n)) from (
-      select coalesce(comuna, 'Sin comuna') comuna, count(*) n from public.estacionamientos group by 1 order by 2 desc limit 6) q), '[]'),
-    'servidor', jsonb_build_object(
-      'db', pg_database_size(current_database()), 'db_lim', 500 * 1024 * 1024,
-      'fotos', (select coalesce(sum((metadata ->> 'size')::bigint), 0) from storage.objects where bucket_id = 'fotos'),
-      'privado', (select coalesce(sum((metadata ->> 'size')::bigint), 0) from storage.objects where bucket_id = 'privado'),
-      'archivos', (select count(*) from storage.objects where bucket_id in ('fotos', 'privado')),
-      'st_lim', 1024 * 1024 * 1024,
-      'mensajes', (select count(*) from public.mensajes),
-      'por_borrar', (select count(*) from public.por_borrar)));
-end $$;
 
-create or replace function public.admin_usuarios(p_q text, p_filtro text, p_off int) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare q text := '%' || lower(coalesce(trim(p_q), '')) || '%';
-begin
-  perform public._solo_admin();
-  return coalesce((select jsonb_agg(x) from (
-    select jsonb_build_object('id', p.id, 'nombre', p.nombre, 'email', p.email, 'avatar', p.avatar, 'icono', p.icono, 'color', p.color,
-      'verificado', p.verificado, 'premium_hasta', p.premium_hasta, 'premium', public._premium(p), 'plan_origen', p.plan_origen,
-      'suspendido', p.suspendido, 'admin', p.es_admin, 'creado', p.creado, 'ultimo_acceso', p.ultimo_acceso, 'rut', v.rut,
-      'publicados', (select count(*) from public.estacionamientos e where e.dueno = p.id),
-      'denuncias', (select count(*) from public.denuncias d where d.denunciado = p.id)) x
-    from public.perfiles p left join public.verificaciones v on v.usuario = p.id
-    where (lower(p.nombre) like q or p.email like q or coalesce(v.rut, '') like upper(q))
-      and case coalesce(p_filtro, '')
-        when 'premium' then public._premium(p) and not p.es_admin
-        when 'gratis' then not public._premium(p)
-        when 'verificados' then p.verificado
-        when 'sin_verificar' then not p.verificado
-        when 'suspendidos' then p.suspendido
-        else true end
-    order by p.creado desc offset greatest(coalesce(p_off, 0), 0) limit 50) q), '[]');
-end $$;
 
-create or replace function public.admin_premium(p_id uuid, p_meses int) returns void
-language plpgsql security definer set search_path = public as $$
-begin
-  perform public._solo_admin();
-  -- p_meses: >0 suma meses · 0 de por vida · -1 quita Premium
-  update public.perfiles set
-    premium_hasta = case when p_meses < 0 then null when p_meses = 0 then 'infinity'::timestamptz
-      else greatest(now(), coalesce(premium_hasta, now())) + make_interval(months => p_meses) end,
-    plan_origen = case when p_meses < 0 then plan_origen else 'admin' end
-  where id = p_id;
-  perform public._notificar(p_id, case when p_meses < 0 then 'Tu Premium terminó' else '⭐ ¡Ya eres Premium!' end,
-    case when p_meses < 0 then 'Tu cuenta volvió al plan Gratis' else 'Disfruta todas las funciones Premium' end, '#/premium');
-end $$;
 
 create or replace function public.admin_suspender(p_id uuid, p_si boolean) returns void
 language plpgsql security definer set search_path = public as $$
@@ -1152,30 +821,7 @@ begin
   update public.licencias set revocada = true where key = p_key;
 end $$;
 
-create or replace function public.admin_pagos() returns jsonb
-language plpgsql security definer set search_path = public as $$
-begin
-  perform public._solo_admin();
-  return coalesce((select jsonb_agg(jsonb_build_object('id', g.id, 'nota', g.nota, 'creado', g.creado, 'usuario', public._pj(g.usuario),
-      'email', p.email) order by g.creado)
-    from public.pagos g join public.perfiles p on p.id = g.usuario where g.estado = 'pendiente'), '[]');
-end $$;
 
-create or replace function public.admin_resolver_pago(p_id uuid, p_aprobar boolean) returns void
-language plpgsql security definer set search_path = public as $$
-declare g public.pagos; m int := coalesce((select valor::int from public.ajustes where clave = 'meses_por_pago'), 1);
-begin
-  perform public._solo_admin();
-  select * into g from public.pagos where id = p_id and estado = 'pendiente';
-  if not found then raise exception 'Ese aviso ya fue revisado'; end if;
-  update public.pagos set estado = case when p_aprobar then 'aprobado' else 'rechazado' end where id = p_id;
-  if p_aprobar then
-    perform public.admin_premium(g.usuario, m);
-    update public.perfiles set plan_origen = 'pago' where id = g.usuario;
-  else
-    perform public._notificar(g.usuario, 'No encontramos tu pago', 'Escríbenos a soporte con el comprobante', '#/chat');
-  end if;
-end $$;
 
 create or replace function public.admin_ajustes() returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -1218,6 +864,833 @@ begin
 end $$;
 
 -- =====================================================================
+--  VERSIÓN 2 · Modelo BiciTaller adaptado a estacionamientos
+--  Reglas, textos y planes editables · 2 links de pago · reservas con
+--  tiempo retenido y comprobante · saldo a favor · ubicación exacta.
+-- =====================================================================
+create table if not exists public.config (clave text primary key, valor jsonb not null);
+insert into public.config (clave, valor) values
+  ('minutos_pago', '30'),            -- tiempo para pagar y subir el comprobante (la reserva queda retenida)
+  ('minutos_devolucion', '10'),      -- cancelar dentro de este tiempo: se devuelve lo pagado
+  ('horas_cancelacion', '24'),       -- con esta anticipación o más: queda como saldo a favor
+  ('dias_saldo', '90'),              -- días que dura el saldo a favor
+  ('dias_regalo', '7'),              -- Premium de regalo al crear una cuenta
+  ('dias_aviso_vencimiento', '3'),   -- aviso antes de que venza el Premium
+  ('dias_comprobantes', '30'),       -- los comprobantes se borran solos después de estos días
+  ('dias_mensajes', '30'),           -- los mensajes del chat se borran solos después de estos días
+  ('mensajes_seguidos', '3'),        -- mensajes seguidos sin respuesta
+  ('mensajes_dia', '100')            -- mensajes por día por persona
+on conflict (clave) do nothing;
+insert into public.config (clave, valor) values ('version_bd', '2') on conflict (clave) do update set valor = excluded.valor;
+alter table public.config enable row level security;
+
+create table if not exists public.textos (clave text primary key, valor text not null default '');
+insert into public.textos (clave, valor) values
+  ('app_lema', 'Arrienda o publica estacionamientos con personas verificadas'),
+  ('reserva_pago', 'Tu reserva queda apartada {minutos} minutos. Paga con el botón "Pagar", toma una captura del comprobante y súbela aquí. Si no subes el comprobante a tiempo, la reserva se libera.'),
+  ('reserva_politica', 'Puedes cancelar sin costo dentro de los primeros {devolucion} minutos (se te devuelve lo pagado). Después, si cancelas con {horas} horas o más de anticipación, lo pagado queda como saldo a favor con ese dueño por {dias} días. Con menos de {horas} horas o si no llegas, pierdes lo pagado.'),
+  ('premium_titulo', 'Estaciona Premium'),
+  ('premium_texto', 'Publica más estacionamientos, destaca en el mapa con pin dorado, arrienda sin límites y recibe alertas de zona.'),
+  ('pago_instrucciones', 'Toca "Pagar", paga en Mercado Pago, toma una captura del comprobante y súbela aquí. Te avisamos apenas se apruebe.'),
+  ('bienvenida', '¡Bienvenido a Estaciona! Verifica tu identidad, completa tu perfil y configura tu link de pago para empezar a arrendar.'),
+  ('aviso_seguridad', 'Nunca pagues fuera de la app sin conocer al dueño. Si algo parece estafa, denúncialo con evidencia.')
+on conflict (clave) do nothing;
+alter table public.textos enable row level security;
+
+create table if not exists public.planes (
+  codigo        text primary key check (codigo in ('gratis', 'premium')),
+  nombre        text not null,
+  descripcion   text not null default '',
+  limites       jsonb not null default '{}',
+  beneficios    jsonb not null default '[]',
+  duracion_dias int not null default 30 check (duracion_dias between 1 and 3650)
+);
+insert into public.planes (codigo, nombre, descripcion, limites, beneficios, duracion_dias) values
+  ('gratis', 'Gratis', 'Lo básico para arrendar y publicar.',
+   '{"publicar": 1, "arrendar": 1, "fotos": 3, "favoritos": 3, "destacado": false, "estadisticas": false, "alertas": false, "color_libre": false, "qr_color": false}',
+   '["1 estacionamiento publicado", "1 arriendo activo a la vez", "3 fotos por estacionamiento", "Reservas con comprobante y chat seguro"]', 30),
+  ('premium', 'Premium', 'Para quien arrienda en serio.',
+   '{"publicar": 10, "arrendar": 10, "fotos": 8, "favoritos": 500, "destacado": true, "estadisticas": true, "alertas": true, "color_libre": true, "qr_color": true}',
+   '["Hasta 10 estacionamientos publicados", "Hasta 10 arriendos activos", "8 fotos por estacionamiento", "Pin dorado destacado y primero en la lista", "Estadísticas de visitas, reservas e ingresos", "Alerta de nuevos estacionamientos cerca", "Color libre del perfil y QR con tu color"]', 30)
+on conflict (codigo) do nothing;
+alter table public.planes enable row level security;
+
+-- Links de pago: 2 espacios por tipo, uno activo. "arriendo" = del dueño (le pagan a él). "premium" = del administrador.
+create table if not exists public.links_pago (
+  id          uuid primary key default gen_random_uuid(),
+  dueno       uuid references public.perfiles (id) on delete cascade,
+  tipo        text not null check (tipo in ('arriendo', 'premium')),
+  slot        smallint not null check (slot in (1, 2)),
+  monto       int not null default 0 check (monto >= 0 and monto <= 5000000),
+  url         text not null default '' check (url = '' or url ~ '^https://'),
+  texto       text not null default '' check (length(texto) <= 300),
+  activo      boolean not null default false,
+  actualizado timestamptz not null default now(),
+  check ((tipo = 'arriendo') = (dueno is not null))
+);
+create unique index if not exists links_pago_uni on public.links_pago (coalesce(dueno, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot);
+alter table public.links_pago enable row level security;
+insert into public.links_pago (dueno, tipo, slot, monto, url, activo)
+select null, 'premium', s,
+  coalesce((select nullif(regexp_replace(valor, '\D', '', 'g'), '')::int from public.ajustes where clave = 'precio'), 4900),
+  case when s = 1 then coalesce((select valor from public.ajustes where clave = 'link_pago' and valor ~ '^https://'), '') else '' end,
+  s = 1
+from generate_series(1, 2) s
+where not exists (select 1 from public.links_pago l where l.dueno is null and l.tipo = 'premium' and l.slot = s);
+
+alter table public.perfiles add column if not exists whatsapp text;
+
+alter table public.arriendos
+  add column if not exists inicio timestamptz,
+  add column if not exists fin timestamptz,
+  add column if not exists cantidad int not null default 1,
+  add column if not exists total int not null default 0,
+  add column if not exists monto_pagar int not null default 0,
+  add column if not exists saldo_aplicado int not null default 0,
+  add column if not exists saldo_monto int not null default 0,
+  add column if not exists saldo_hasta timestamptz,
+  add column if not exists expira_at timestamptz,
+  add column if not exists pago_estado text not null default 'sin_pago',
+  add column if not exists comprobante text,
+  add column if not exists comprobante_at timestamptz,
+  add column if not exists motivo text;
+alter table public.arriendos drop constraint if exists arriendos_estado_check;
+alter table public.arriendos add constraint arriendos_estado_check
+  check (estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado', 'rechazado', 'cancelado', 'finalizado', 'expirado'));
+alter table public.arriendos drop constraint if exists arriendos_pago_estado_check;
+alter table public.arriendos add constraint arriendos_pago_estado_check
+  check (pago_estado in ('sin_pago', 'pendiente', 'en_revision', 'pagado', 'rechazado', 'devolver', 'devuelto', 'saldo', 'perdido', 'aplicado', 'no_pagado'));
+update public.arriendos set inicio = coalesce(desde::timestamptz, creado),
+  fin = coalesce(desde::timestamptz, creado) + case modalidad when 'hora' then interval '1 hour' when 'dia' then interval '1 day' else interval '1 month' end
+where inicio is null;
+create index if not exists arr_rango on public.arriendos (estacionamiento, inicio);
+create index if not exists arr_vence on public.arriendos (expira_at) where estado = 'por_pagar';
+
+alter table public.pagos
+  add column if not exists monto int not null default 0,
+  add column if not exists comprobante text,
+  add column if not exists motivo text,
+  add column if not exists resuelto timestamptz;
+
+-- Ubicación exacta: el pin queda justo en el estacionamiento.
+update public.estacionamientos set lat_pub = lat, lng_pub = lng where lat_pub is distinct from lat or lng_pub is distinct from lng;
+
+-- ---------- Utilidades de configuración y planes ----------
+create or replace function public._cfg(k text) returns int
+language sql stable security definer set search_path = public as $$
+  select coalesce((select (valor #>> '{}')::int from public.config where clave = k), 0)
+$$;
+
+create or replace function public._plan(p public.perfiles) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce((select limites from public.planes where codigo = case when public._premium(p) then 'premium' else 'gratis' end), '{}')
+$$;
+
+create or replace function public._lim(p public.perfiles, que text) returns int
+language sql stable security definer set search_path = public as $$
+  select coalesce((public._plan(p) ->> que)::int, 0)
+$$;
+
+create or replace function public._puede(p public.perfiles, que text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select p.es_admin or coalesce((public._plan(p) ->> que)::boolean, false)
+$$;
+
+create or replace function public.puede_ver_privado(nombre text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.es_admin() or split_part(nombre, '/', 1) = auth.uid()::text
+    or exists (select 1 from public.arriendos a where a.comprobante = nombre and a.dueno = auth.uid())
+$$;
+drop policy if exists "est privado ver" on storage.objects;
+create policy "est privado ver" on storage.objects for select to authenticated
+  using (bucket_id = 'privado' and public.puede_ver_privado(name));
+
+-- ---------- Archivos que dejan de usarse ----------
+drop trigger if exists arr_borrar_fotos on public.arriendos;
+create trigger arr_borrar_fotos after update of comprobante or delete on public.arriendos for each row execute function public._borrar_fotos();
+drop trigger if exists pag_borrar_fotos on public.pagos;
+create trigger pag_borrar_fotos after update of comprobante or delete on public.pagos for each row execute function public._borrar_fotos();
+
+-- ---------- Cuenta nueva: días de Premium de regalo (editable) ----------
+
+-- =====================================================================
+--  Datos públicos (también sin sesión)
+-- =====================================================================
+create or replace function public.ajustes_publicos() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'precio', coalesce(l.monto, 0), 'link_pago', coalesce(l.url, ''), 'texto_pago', coalesce(l.texto, ''),
+    'vapid_public', (select valor from public.ajustes where clave = 'vapid_public'),
+    'version_bd', (select valor #>> '{}' from public.config where clave = 'version_bd'),
+    'reglas', (select jsonb_object_agg(clave, valor) from public.config where clave <> 'version_bd'),
+    'textos', (select jsonb_object_agg(clave, valor) from public.textos),
+    'planes', (select jsonb_object_agg(codigo, jsonb_build_object('nombre', nombre, 'descripcion', descripcion, 'limites', limites,
+      'beneficios', beneficios, 'duracion_dias', duracion_dias)) from public.planes))
+  from (select 1) x
+  left join lateral (select * from public.links_pago where dueno is null and tipo = 'premium' and activo order by slot limit 1) l on true
+$$;
+
+create or replace function public.mapa(p_s double precision, p_w double precision, p_n double precision, p_e double precision)
+returns table (id uuid, la double precision, lo double precision, ph int, pd int, pm int, v text,
+  t boolean, h boolean, sg boolean, cg boolean, c text, f text, d boolean)
+language sql stable security definer set search_path = public as $$
+  with vis as (
+    select e.*, public._puede(p, 'destacado') as dest, public._lim(p, 'publicar') as lim,
+      row_number() over (partition by e.dueno order by e.creado) as n
+    from public.estacionamientos e join public.perfiles p on p.id = e.dueno
+    where e.estado = 'disponible' and not p.suspendido and (p.verificado or p.es_admin)
+  )
+  select vis.id, vis.lat, vis.lng, vis.precio_hora, vis.precio_dia, vis.precio_mes, vis.vehiculo,
+    vis.techado, vis.acceso24, vis.seguridad, vis.carga, vis.comuna, vis.fotos[1], vis.dest
+  from vis
+  where vis.n <= vis.lim and vis.lat between p_s and p_n and vis.lng between p_w and p_e
+  order by vis.dest desc, vis.creado desc
+  limit 400
+$$;
+
+-- Ficha pública: dirección y ubicación exactas. Para reservar hay que iniciar sesión.
+create or replace function public.estacionamiento_detalle(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); yo public.perfiles; e public.estacionamientos; visible boolean; arr jsonb;
+begin
+  if me is not null then select * into yo from public.perfiles where id = me; end if;
+  select * into e from public.estacionamientos where id = p_id;
+  if not found or (e.estado = 'oculto' and e.dueno is distinct from me and not coalesce(yo.es_admin, false)) then
+    raise exception 'Este estacionamiento ya no está disponible';
+  end if;
+  select (r.n <= public._lim(p, 'publicar')) into visible from (
+    select x.id, row_number() over (order by x.creado) n from public.estacionamientos x where x.dueno = e.dueno) r
+    join public.perfiles p on p.id = e.dueno where r.id = p_id;
+  if e.dueno is distinct from me then update public.estacionamientos set vistas = vistas + 1 where id = p_id; end if;
+  if me is not null then
+    select jsonb_build_object('id', a.id, 'estado', a.estado, 'modalidad', a.modalidad) into arr from public.arriendos a
+    where a.estacionamiento = p_id and a.arrendatario = me and a.estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado')
+    order by a.creado desc limit 1;
+  end if;
+  return jsonb_build_object('id', e.id, 'titulo', e.titulo, 'descripcion', e.descripcion, 'comuna', e.comuna,
+    'lat', e.lat, 'lng', e.lng, 'exacta', true, 'direccion', e.direccion,
+    'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'vehiculo', e.vehiculo, 'techado', e.techado,
+    'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
+    'visible', coalesce(visible, false), 'creado', e.creado, 'mio', e.dueno = me, 'logueado', me is not null,
+    'vistas', case when e.dueno = me or coalesce(yo.es_admin, false) then e.vistas end,
+    'favorito', me is not null and exists (select 1 from public.favoritos f where f.usuario = me and f.estacionamiento = p_id),
+    'mi_arriendo', arr, 'dueno', public._pj(e.dueno),
+    'ocupado', coalesce((select jsonb_agg(jsonb_build_object('inicio', a.inicio, 'fin', a.fin) order by a.inicio)
+      from public.arriendos a where a.estacionamiento = p_id and a.estado in ('por_pagar', 'en_revision', 'aceptado') and a.fin > now()), '[]'));
+end $$;
+
+-- =====================================================================
+--  Cuenta
+-- =====================================================================
+create or replace function public.mi_cuenta() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.perfiles; v public.verificaciones;
+begin
+  select * into p from public.perfiles where id = auth.uid();
+  if not found then return null; end if;
+  update public.perfiles set ultimo_acceso = now() where id = p.id and (ultimo_acceso is null or ultimo_acceso < now() - interval '1 hour');
+  select * into v from public.verificaciones where usuario = p.id;
+  return public._pj(p.id) || jsonb_build_object(
+    'email', p.email, 'whatsapp', p.whatsapp, 'premium_hasta', p.premium_hasta, 'plan_origen', p.plan_origen, 'suspendido', p.suspendido,
+    'acepto', p.acepto_terminos is not null, 'verif_estado', v.estado, 'verif_motivo', v.motivo,
+    'alerta', case when p.alerta_km is not null then jsonb_build_object('lat', p.alerta_lat, 'lng', p.alerta_lng, 'km', p.alerta_km) end,
+    'plan', public._plan(p),
+    'lim', jsonb_build_object('publicar', public._lim(p, 'publicar'), 'arrendar', public._lim(p, 'arrendar'),
+      'fotos', public._lim(p, 'fotos'), 'favoritos', public._lim(p, 'favoritos')),
+    'uso', jsonb_build_object(
+      'publicados', (select count(*) from public.estacionamientos where dueno = p.id),
+      'arrendando', (select count(*) from public.arriendos where arrendatario = p.id and estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado')),
+      'favoritos', (select count(*) from public.favoritos where usuario = p.id)),
+    'link_listo', exists (select 1 from public.links_pago where dueno = p.id and tipo = 'arriendo' and activo and url <> ''));
+end $$;
+
+drop function if exists public.guardar_perfil(text, text, text, text, text, text);
+create or replace function public.guardar_perfil(p_nombre text, p_comuna text, p_bio text, p_icono text, p_color text, p_avatar text, p_whatsapp text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare p public.perfiles := public._yo(); col text := lower(coalesce(p_color, '')); w text := regexp_replace(coalesce(p_whatsapp, ''), '[^0-9+]', '', 'g');
+begin
+  if length(trim(coalesce(p_nombre, ''))) < 2 then raise exception 'Escribe tu nombre'; end if;
+  if col !~ '^#[0-9a-f]{6}$' then col := '#2563eb'; end if;
+  if not public._puede(p, 'color_libre') and col <> p.color and col not in ('#2563eb', '#0f172a', '#16a34a', '#dc2626', '#7c3aed', '#ea580c') then
+    raise exception 'El color libre (RGB) es Premium. Elige uno de la lista o hazte Premium.';
+  end if;
+  if p_avatar is not null and p_avatar !~ ('^' || p.id || '/[A-Za-z0-9._-]+$') then raise exception 'Foto no válida'; end if;
+  if w <> '' and length(regexp_replace(w, '\D', '', 'g')) not between 8 and 15 then raise exception 'Revisa tu WhatsApp (ej: +56912345678)'; end if;
+  update public.perfiles set nombre = left(trim(p_nombre), 60), comuna = left(nullif(trim(p_comuna), ''), 40),
+    bio = left(nullif(trim(p_bio), ''), 280), icono = left(nullif(p_icono, ''), 8), color = col, avatar = p_avatar, whatsapp = nullif(w, '')
+  where id = p.id;
+  return public.mi_cuenta();
+end $$;
+
+create or replace function public.guardar_alerta(p_lat double precision, p_lng double precision, p_km real) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.perfiles := public._yo();
+begin
+  if p_km is not null and not public._puede(p, 'alertas') then raise exception 'Las alertas de zona son Premium'; end if;
+  update public.perfiles set alerta_lat = p_lat, alerta_lng = p_lng, alerta_km = least(greatest(p_km, 0.3), 20) where id = p.id;
+  return public.mi_cuenta();
+end $$;
+
+drop function if exists public.ya_pague(text);
+create or replace function public.ya_pague(p_nota text, p_comprobante text) returns void
+language plpgsql security definer set search_path = public as $$
+declare p public.perfiles := public._yo(); l public.links_pago;
+begin
+  if coalesce(p_comprobante, '') !~ ('^' || p.id || '/[A-Za-z0-9._-]+$') then raise exception 'Sube la foto del comprobante'; end if;
+  if exists (select 1 from public.pagos where usuario = p.id and estado = 'pendiente') then
+    raise exception 'Ya enviaste un comprobante. El administrador lo revisará pronto.';
+  end if;
+  select * into l from public.links_pago where dueno is null and tipo = 'premium' and activo order by slot limit 1;
+  insert into public.pagos (usuario, nota, monto, comprobante) values (p.id, left(p_nota, 200), coalesce(l.monto, 0), p_comprobante);
+  perform public._notificar(public._admin_id(), '💳 Comprobante de Premium', p.nombre || ' subió su comprobante', '#/admin/pagos');
+end $$;
+
+-- ---------- Links de pago del dueño ----------
+create or replace function public.mis_links() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.perfiles := public._yo();
+begin
+  insert into public.links_pago (dueno, tipo, slot, activo)
+  select p.id, 'arriendo', s, false from generate_series(1, 2) s
+  where not exists (select 1 from public.links_pago l where l.dueno = p.id and l.tipo = 'arriendo' and l.slot = s);
+  return (select jsonb_agg(jsonb_build_object('slot', slot, 'monto', monto, 'url', url, 'texto', texto, 'activo', activo) order by slot)
+    from public.links_pago where dueno = p.id and tipo = 'arriendo');
+end $$;
+
+create or replace function public._guardar_link(p_dueno uuid, p_tipo text, p_slot int, p_monto int, p_url text, p_texto text, p_activo boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare u text := trim(coalesce(p_url, ''));
+begin
+  if p_slot not in (1, 2) then raise exception 'Espacio no válido'; end if;
+  if u <> '' and u !~ '^https://' then raise exception 'El link debe empezar con https://'; end if;
+  if coalesce(p_monto, 0) < 0 or coalesce(p_monto, 0) > 5000000 then raise exception 'Revisa el monto'; end if;
+  insert into public.links_pago (dueno, tipo, slot, activo) select p_dueno, p_tipo, x, false from generate_series(1, 2) x
+  where not exists (select 1 from public.links_pago where dueno is not distinct from p_dueno and tipo = p_tipo and slot = x);
+  update public.links_pago set monto = coalesce(p_monto, 0), url = u, texto = left(coalesce(p_texto, ''), 300),
+    activo = coalesce(p_activo, false), actualizado = now()
+  where dueno is not distinct from p_dueno and tipo = p_tipo and slot = p_slot;
+  if p_activo then
+    update public.links_pago set activo = false where dueno is not distinct from p_dueno and tipo = p_tipo and slot <> p_slot;
+  end if;
+end $$;
+
+create or replace function public.guardar_link(p_slot int, p_monto int, p_url text, p_texto text, p_activo boolean) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.perfiles := public._yo();
+begin
+  perform public._guardar_link(p.id, 'arriendo', p_slot, p_monto, p_url, p_texto, p_activo);
+  return public.mis_links();
+end $$;
+
+-- =====================================================================
+--  Reservas (modelo BiciTaller): se aparta, se paga, se sube comprobante,
+--  el dueño aprueba o rechaza; si no se paga a tiempo se libera sola.
+-- =====================================================================
+create or replace function public.liberar_vencidas() returns int
+language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0;
+begin
+  for r in update public.arriendos set estado = 'expirado',
+      pago_estado = case when saldo_aplicado > 0 then 'saldo' else 'no_pagado' end,
+      saldo_monto = saldo_aplicado,
+      saldo_hasta = case when saldo_aplicado > 0 then now() + make_interval(days => public._cfg('dias_saldo')) end,
+      actualizado = now()
+    where estado = 'por_pagar' and expira_at < now()
+    returning id, arrendatario, dueno loop
+    n := n + 1;
+    perform public._notificar(r.arrendatario, '⌛ Tu reserva se liberó', 'No alcanzaste a subir el comprobante a tiempo', '#/reservas');
+    perform public._notificar(r.dueno, 'Reserva liberada', 'Una reserva no se pagó a tiempo y se liberó', '#/reservas');
+  end loop;
+  return n;
+end $$;
+
+drop function if exists public.solicitar_arriendo(uuid, text, date, text);
+create or replace function public.solicitar_arriendo(p_id uuid, p_modalidad text, p_inicio timestamptz, p_cantidad int, p_nota text) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); e public.estacionamientos; nid uuid; precio int; unidad interval; v_fin timestamptz;
+  v_total int; v_pagar int; lk public.links_pago; v_saldo int := 0; max_c int;
+begin
+  perform public.liberar_vencidas();
+  perform public._verificado(yo);
+  select * into e from public.estacionamientos where id = p_id;
+  if not found or e.estado <> 'disponible' then raise exception 'Este estacionamiento no está disponible ahora'; end if;
+  if e.dueno = yo.id then raise exception 'Es tu propio estacionamiento'; end if;
+  precio := case p_modalidad when 'hora' then e.precio_hora when 'dia' then e.precio_dia when 'mes' then e.precio_mes end;
+  if coalesce(precio, 0) <= 0 then raise exception 'Este estacionamiento no se arrienda de esa forma'; end if;
+  unidad := case p_modalidad when 'hora' then interval '1 hour' when 'dia' then interval '1 day' else interval '1 month' end;
+  max_c := case p_modalidad when 'hora' then 24 when 'dia' then 31 else 12 end;
+  if p_cantidad is null or p_cantidad < 1 or p_cantidad > max_c then raise exception 'Cantidad no válida (máximo %)', max_c; end if;
+  if p_inicio is null or p_inicio < now() - interval '15 minutes' then raise exception 'Elige una fecha y hora desde ahora en adelante'; end if;
+  if p_inicio > now() + interval '180 days' then raise exception 'Puedes reservar con hasta 180 días de anticipación'; end if;
+  v_fin := p_inicio + unidad * p_cantidad;
+  if exists (select 1 from public.bloqueos where (quien = e.dueno and bloqueado = yo.id) or (quien = yo.id and bloqueado = e.dueno)) then
+    raise exception 'No puedes contactar a esta persona';
+  end if;
+  if exists (select 1 from public.arriendos where estacionamiento = p_id and arrendatario = yo.id and estado in ('pendiente', 'por_pagar', 'en_revision')) then
+    raise exception 'Ya tienes una reserva en curso para este estacionamiento';
+  end if;
+  if (select count(*) from public.arriendos where arrendatario = yo.id and estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado')) >= public._lim(yo, 'arrendar') then
+    raise exception 'Tu plan permite % arriendo(s) a la vez. Hazte Premium para tener más.', public._lim(yo, 'arrendar');
+  end if;
+  if exists (select 1 from public.arriendos a where a.estacionamiento = p_id and a.estado in ('por_pagar', 'en_revision', 'aceptado')
+      and tstzrange(a.inicio, a.fin) && tstzrange(p_inicio, v_fin)) then
+    raise exception 'Ese horario ya está reservado. Elige otro.';
+  end if;
+  v_total := precio * p_cantidad;
+  select * into lk from public.links_pago where dueno = e.dueno and tipo = 'arriendo' and activo order by slot limit 1;
+  -- Si el dueño fijó un abono, se paga eso para confirmar (el resto se paga al llegar).
+  v_pagar := case when coalesce(lk.monto, 0) > 0 then least(lk.monto, v_total) else v_total end;
+  with s as (
+    update public.arriendos set pago_estado = 'aplicado', actualizado = now()
+    where arrendatario = yo.id and dueno = e.dueno and pago_estado = 'saldo' and saldo_hasta > now()
+    returning saldo_monto)
+  select coalesce(sum(saldo_monto), 0) into v_saldo from s;
+  v_pagar := greatest(0, v_pagar - v_saldo);
+  insert into public.arriendos (estacionamiento, dueno, arrendatario, modalidad, desde, inicio, fin, cantidad, total, monto_pagar,
+    saldo_aplicado, nota, estado, pago_estado, expira_at)
+  values (p_id, e.dueno, yo.id, p_modalidad, (p_inicio at time zone 'America/Santiago')::date, p_inicio, v_fin, p_cantidad, v_total, v_pagar,
+    v_saldo, left(p_nota, 300), case when v_pagar > 0 then 'por_pagar' else 'en_revision' end,
+    case when v_pagar > 0 then 'pendiente' else 'en_revision' end,
+    now() + make_interval(mins => greatest(public._cfg('minutos_pago'), 5)))
+  returning id into nid;
+  perform public._notificar(e.dueno, case when v_pagar > 0 then '⏳ Nueva reserva: esperando pago' else '🧾 Nueva reserva por revisar' end,
+    yo.nombre || ' reservó "' || e.titulo || '"', '#/reservas');
+  return nid;
+end $$;
+
+create or replace function public.subir_comprobante(p_id uuid, p_ruta text) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos;
+begin
+  perform public.liberar_vencidas();
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.estado not in ('por_pagar', 'en_revision') then raise exception 'Esta reserva ya no espera pago'; end if;
+  if coalesce(p_ruta, '') !~ ('^' || yo.id || '/[A-Za-z0-9._-]+$') then raise exception 'Sube la foto del comprobante'; end if;
+  update public.arriendos set estado = 'en_revision', pago_estado = 'en_revision', comprobante = p_ruta, comprobante_at = now(), actualizado = now()
+  where id = p_id;
+  perform public._notificar(a.dueno, '🧾 Comprobante por revisar', yo.nombre || ' subió el comprobante de su reserva', '#/reservas');
+end $$;
+
+drop function if exists public.responder_arriendo(uuid, boolean);
+create or replace function public.responder_arriendo(p_id uuid, p_aceptar boolean, p_motivo text) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; e public.estacionamientos; o record;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.dueno <> yo.id or a.estado not in ('pendiente', 'por_pagar', 'en_revision') then
+    raise exception 'Esta reserva ya no está pendiente';
+  end if;
+  select * into e from public.estacionamientos where id = a.estacionamiento;
+  if p_aceptar then
+    update public.arriendos set estado = 'aceptado', expira_at = null,
+      pago_estado = case when a.monto_pagar > 0 or a.saldo_aplicado > 0 or a.pago_estado = 'en_revision' then 'pagado' else a.pago_estado end,
+      actualizado = now() where id = p_id;
+    perform public._notificar(a.arrendatario, '✅ ¡Reserva confirmada!', 'Tu reserva en "' || e.titulo || '" está confirmada', '#/reservas');
+    if a.modalidad = 'mes' then
+      update public.estacionamientos set estado = 'ocupado' where id = e.id and estado = 'disponible';
+      for o in update public.arriendos set estado = 'rechazado', actualizado = now()
+        where estacionamiento = e.id and estado = 'pendiente' and id <> p_id returning arrendatario loop
+        perform public._notificar(o.arrendatario, 'Solicitud no aceptada', '"' || e.titulo || '" ya fue arrendado', '#/reservas');
+      end loop;
+    end if;
+  else
+    update public.arriendos set estado = 'rechazado', motivo = left(nullif(trim(p_motivo), ''), 300), expira_at = null,
+      pago_estado = case when a.saldo_aplicado > 0 then 'saldo' when a.pago_estado = 'en_revision' then 'rechazado' else a.pago_estado end,
+      saldo_monto = a.saldo_aplicado,
+      saldo_hasta = case when a.saldo_aplicado > 0 then now() + make_interval(days => public._cfg('dias_saldo')) end,
+      actualizado = now() where id = p_id;
+    perform public._notificar(a.arrendatario, 'Reserva no aceptada', coalesce(nullif(trim(p_motivo), ''), 'El dueño de "' || e.titulo || '" no aceptó tu reserva'), '#/reservas');
+  end if;
+end $$;
+
+create or replace function public.cerrar_arriendo(p_id uuid, p_accion text) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; t text; otro uuid; pagado int; res text; txt text;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or yo.id not in (a.dueno, a.arrendatario) then raise exception 'Reserva no encontrada'; end if;
+  select titulo into t from public.estacionamientos where id = a.estacionamiento;
+  otro := case when yo.id = a.dueno then a.arrendatario else a.dueno end;
+  pagado := a.monto_pagar + a.saldo_aplicado;
+  if p_accion = 'cancelar' and a.estado in ('pendiente', 'por_pagar') then
+    update public.arriendos set estado = 'cancelado', expira_at = null,
+      pago_estado = case when a.saldo_aplicado > 0 then 'saldo' else 'sin_pago' end, saldo_monto = a.saldo_aplicado,
+      saldo_hasta = case when a.saldo_aplicado > 0 then now() + make_interval(days => public._cfg('dias_saldo')) end,
+      actualizado = now() where id = p_id;
+    perform public._notificar(otro, 'Reserva cancelada', yo.nombre || ' canceló la reserva de "' || t || '"', '#/reservas');
+  elsif p_accion = 'cancelar' and a.estado in ('en_revision', 'aceptado') then
+    res := case
+      when pagado = 0 then 'sin_pago'
+      when yo.id = a.dueno then 'devolver'
+      when now() - a.creado <= make_interval(mins => public._cfg('minutos_devolucion')) then 'devolver'
+      when a.inicio - now() >= make_interval(hours => public._cfg('horas_cancelacion')) then 'saldo'
+      else 'perdido' end;
+    update public.arriendos set estado = 'cancelado', pago_estado = res,
+      saldo_monto = case when res = 'saldo' then pagado else 0 end,
+      saldo_hasta = case when res = 'saldo' then now() + make_interval(days => public._cfg('dias_saldo')) end,
+      actualizado = now() where id = p_id;
+    txt := case res when 'devolver' then 'Se debe devolver lo pagado' when 'saldo' then 'Lo pagado queda como saldo a favor'
+      when 'perdido' then 'Se canceló con poca anticipación: no hay devolución' else '' end;
+    perform public._notificar(otro, 'Reserva cancelada', yo.nombre || ' canceló "' || t || '". ' || txt, '#/reservas');
+  elsif p_accion = 'finalizar' and a.estado = 'aceptado' then
+    update public.arriendos set estado = 'finalizado', actualizado = now() where id = p_id;
+    perform public._notificar(otro, '⭐ Arriendo finalizado', 'Califica tu experiencia en "' || t || '"', '#/reservas');
+  elsif p_accion = 'devuelto' and yo.id = a.dueno and a.pago_estado = 'devolver' then
+    update public.arriendos set pago_estado = 'devuelto', actualizado = now() where id = p_id;
+    perform public._notificar(otro, '💸 Te devolvieron el pago', 'El dueño de "' || t || '" marcó la devolución', '#/reservas');
+    return;
+  else
+    raise exception 'No se puede hacer esto con esta reserva';
+  end if;
+  if a.estado = 'aceptado' and a.modalidad = 'mes' then
+    update public.estacionamientos set estado = 'disponible' where id = a.estacionamiento and estado = 'ocupado'
+      and not exists (select 1 from public.arriendos x where x.estacionamiento = a.estacionamiento and x.estado = 'aceptado' and x.modalidad = 'mes');
+  end if;
+end $$;
+
+create or replace function public.mis_arriendos() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  perform public.liberar_vencidas();
+  return coalesce((select jsonb_agg(x order by (x ->> 'orden')::int, x ->> 'inicio') from (
+    select jsonb_build_object('id', a.id, 'estado', a.estado, 'pago_estado', a.pago_estado, 'modalidad', a.modalidad,
+      'inicio', a.inicio, 'fin', a.fin, 'cantidad', a.cantidad, 'total', a.total, 'monto_pagar', a.monto_pagar,
+      'saldo_aplicado', a.saldo_aplicado, 'saldo_monto', a.saldo_monto, 'saldo_hasta', a.saldo_hasta, 'expira_at', a.expira_at,
+      'motivo', a.motivo, 'nota', a.nota, 'creado', a.creado, 'soy_dueno', a.dueno = me, 'comprobante', a.comprobante,
+      'orden', case a.estado when 'en_revision' then 0 when 'por_pagar' then 1 when 'pendiente' then 1 when 'aceptado' then 2 else 3 end,
+      'est', jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1], 'direccion', e.direccion,
+        'lat', e.lat, 'lng', e.lng, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes),
+      'otro', public._pj(case when a.dueno = me then a.arrendatario else a.dueno end),
+      'whatsapp', case when a.estado in ('aceptado', 'finalizado', 'en_revision') then
+        (select whatsapp from public.perfiles where id = case when a.dueno = me then a.arrendatario else a.dueno end) end,
+      'pago', case when a.arrendatario = me and a.estado in ('por_pagar', 'en_revision') then
+        (select jsonb_build_object('url', l.url, 'texto', l.texto) from public.links_pago l
+         where l.dueno = a.dueno and l.tipo = 'arriendo' and l.activo order by l.slot limit 1) end,
+      'calificado', exists (select 1 from public.calificaciones c where c.arriendo = a.id and c.autor = me)) x
+    from public.arriendos a join public.estacionamientos e on e.id = a.estacionamiento
+    where a.dueno = me or a.arrendatario = me
+    order by a.creado desc limit 300) q), '[]');
+end $$;
+
+create or replace function public.panel() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); hoy date := (now() at time zone 'America/Santiago')::date;
+begin
+  perform public.liberar_vencidas();
+  return jsonb_build_object(
+    'revisar', (select count(*) from public.arriendos where dueno = yo.id and estado in ('en_revision', 'pendiente')),
+    'hoy', (select count(*) from public.arriendos where dueno = yo.id and estado = 'aceptado'
+      and (inicio at time zone 'America/Santiago')::date <= hoy and (fin at time zone 'America/Santiago')::date >= hoy),
+    'pagando', (select count(*) from public.arriendos where dueno = yo.id and estado = 'por_pagar'),
+    'devolver', (select count(*) from public.arriendos where dueno = yo.id and pago_estado = 'devolver'),
+    'falta', jsonb_build_object(
+      'verificar', not yo.verificado,
+      'whatsapp', yo.whatsapp is null,
+      'link', not exists (select 1 from public.links_pago where dueno = yo.id and tipo = 'arriendo' and activo and url <> ''),
+      'publicar', not exists (select 1 from public.estacionamientos where dueno = yo.id)));
+end $$;
+
+create or replace function public.mis_estadisticas() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo();
+begin
+  if not public._puede(yo, 'estadisticas') then raise exception 'Las estadísticas son Premium'; end if;
+  return jsonb_build_object(
+    'meses', coalesce((select jsonb_agg(jsonb_build_object('mes', to_char(m, 'MM/YY'),
+        'reservas', (select count(*) from public.arriendos a where a.dueno = yo.id and a.estado in ('aceptado', 'finalizado')
+          and date_trunc('month', a.inicio at time zone 'America/Santiago') = m),
+        'ingresos', (select coalesce(sum(a.total), 0) from public.arriendos a where a.dueno = yo.id and a.estado in ('aceptado', 'finalizado')
+          and date_trunc('month', a.inicio at time zone 'America/Santiago') = m)) order by m)
+      from generate_series(date_trunc('month', now() at time zone 'America/Santiago') - interval '5 months',
+        date_trunc('month', now() at time zone 'America/Santiago'), interval '1 month') m), '[]'),
+    'vistas', (select coalesce(sum(vistas), 0) from public.estacionamientos where dueno = yo.id),
+    'favoritos', (select count(*) from public.favoritos f join public.estacionamientos e on e.id = f.estacionamiento where e.dueno = yo.id),
+    'canceladas', (select count(*) from public.arriendos where dueno = yo.id and estado in ('cancelado', 'expirado')),
+    'por_modalidad', (select coalesce(jsonb_object_agg(modalidad, n), '{}') from (select modalidad, count(*) n from public.arriendos
+      where dueno = yo.id and estado in ('aceptado', 'finalizado') group by 1) q));
+end $$;
+
+create or replace function public.mis_estacionamientos() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); st boolean := public._puede(yo, 'estadisticas'); lim int := public._lim(yo, 'publicar');
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1],
+      'estado', e.estado, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'visible', r.n <= lim,
+      'stats', case when st then jsonb_build_object('vistas', e.vistas,
+        'favoritos', (select count(*) from public.favoritos f where f.estacionamiento = e.id),
+        'solicitudes', (select count(*) from public.arriendos a where a.estacionamiento = e.id)) end) order by e.creado)
+    from public.estacionamientos e
+    join (select id, row_number() over (order by creado) n from public.estacionamientos where dueno = yo.id) r on r.id = e.id
+    where e.dueno = yo.id), '[]');
+end $$;
+
+create or replace function public.contadores() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'mensajes', (select count(*) from public.mensajes m join public.conversaciones c on c.id = m.conv
+      where (c.a = auth.uid() or c.b = auth.uid()) and m.autor <> auth.uid() and not m.visto),
+    'avisos', (select count(*) from public.notificaciones where usuario = auth.uid() and not leida and not chat),
+    'solicitudes', (select count(*) from public.arriendos where dueno = auth.uid() and estado in ('pendiente', 'en_revision')
+      or (dueno = auth.uid() and pago_estado = 'devolver')))
+$$;
+
+-- Perfil público: solo el promedio de estrellas (sin comentarios).
+create or replace function public.perfil_publico(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo();
+begin
+  if not exists (select 1 from public.perfiles where id = p_id) then raise exception 'Perfil no encontrado'; end if;
+  return public._pj(p_id) || jsonb_build_object(
+    'bloqueado', exists (select 1 from public.bloqueos where quien = yo.id and bloqueado = p_id),
+    'estacionamientos', coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna,
+        'foto', e.fotos[1], 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes) order by e.creado)
+      from public.estacionamientos e where e.dueno = p_id and e.estado in ('disponible', 'ocupado')), '[]'),
+    'opiniones', '[]'::jsonb);
+end $$;
+
+create or replace function public.enviar_mensaje(p_conv uuid, p_texto text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); c public.conversaciones; otro public.perfiles; t text := trim(coalesce(p_texto, ''));
+  seguidos int; mid bigint; lim_seg int := greatest(public._cfg('mensajes_seguidos'), 1); lim_dia int := greatest(public._cfg('mensajes_dia'), 1);
+begin
+  select * into c from public.conversaciones where id = p_conv;
+  if not found or yo.id not in (c.a, c.b) then raise exception 'Conversación no encontrada'; end if;
+  select * into otro from public.perfiles where id = case when c.a = yo.id then c.b else c.a end;
+  if t = '' then raise exception 'Escribe un mensaje'; end if;
+  if length(t) > 500 then raise exception 'Máximo 500 caracteres'; end if;
+  if not yo.es_admin then
+    if not otro.es_admin then
+      perform public._verificado(yo);
+      if exists (select 1 from public.bloqueos where (quien = otro.id and bloqueado = yo.id) or (quien = yo.id and bloqueado = otro.id)) then
+        raise exception 'No puedes escribir a esta persona (bloqueo)';
+      end if;
+    end if;
+    select count(*) into seguidos from public.mensajes where conv = p_conv and autor = yo.id
+      and id > coalesce((select max(id) from public.mensajes where conv = p_conv and autor <> yo.id), 0);
+    if seguidos >= lim_seg then raise exception 'Máximo % mensajes seguidos. Espera la respuesta 🙂', lim_seg; end if;
+    if (select count(*) from public.mensajes where autor = yo.id and creado > now() - interval '1 day') >= lim_dia then
+      raise exception 'Llegaste al máximo de % mensajes por día', lim_dia;
+    end if;
+  end if;
+  insert into public.mensajes (conv, autor, texto) values (p_conv, yo.id, t) returning id into mid;
+  update public.conversaciones set ultimo = now(), ultimo_texto = left(t, 80), ultimo_autor = yo.id where id = p_conv;
+  if not exists (select 1 from public.bloqueos where quien = otro.id and bloqueado = yo.id) then
+    perform public._notificar(otro.id, '💬 ' || yo.nombre, t, '#/chat/' || p_conv, true);
+  end if;
+  return mid;
+end $$;
+
+-- =====================================================================
+--  Administración v2
+-- =====================================================================
+create or replace function public.admin_resumen() returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  perform public.liberar_vencidas();
+  return jsonb_build_object(
+    'usuarios', (select count(*) from public.perfiles),
+    'nuevos7', (select count(*) from public.perfiles where creado > now() - interval '7 days'),
+    'activos7', (select count(*) from public.perfiles where ultimo_acceso > now() - interval '7 days'),
+    'verificados', (select count(*) from public.perfiles where verificado),
+    'premium', (select count(*) from public.perfiles p where p.premium_hasta > now() and p.plan_origen <> 'prueba' and not p.es_admin),
+    'prueba', (select count(*) from public.perfiles p where p.premium_hasta > now() and p.plan_origen = 'prueba' and not p.es_admin),
+    'por_vencer', (select count(*) from public.perfiles p where p.premium_hasta between now() and now() + interval '7 days' and not p.es_admin),
+    'suspendidos', (select count(*) from public.perfiles where suspendido),
+    'estacionamientos', (select count(*) from public.estacionamientos),
+    'disponibles', (select count(*) from public.estacionamientos where estado = 'disponible'),
+    'arriendos_activos', (select count(*) from public.arriendos where estado = 'aceptado'),
+    'arriendos_total', (select count(*) from public.arriendos),
+    'reservas_revision', (select count(*) from public.arriendos where estado = 'en_revision'),
+    'pend_verif', (select count(*) from public.verificaciones where estado = 'pendiente'),
+    'pend_denuncias', (select count(*) from public.denuncias where estado = 'abierta'),
+    'pend_pagos', (select count(*) from public.pagos where estado = 'pendiente'),
+    'ingresos_mes', (select coalesce(sum(monto), 0) from public.pagos where estado = 'aprobado'
+      and date_trunc('month', coalesce(resuelto, creado)) = date_trunc('month', now())),
+    'keys_libres', (select count(*) from public.licencias where canjeada_por is null and not revocada),
+    'version_bd', (select valor #>> '{}' from public.config where clave = 'version_bd'),
+    'registros', coalesce((select jsonb_agg(jsonb_build_object('d', d, 'n', n) order by d) from (
+      select g::date d, (select count(*) from public.perfiles where creado::date = g::date) n
+      from generate_series(current_date - 13, current_date, interval '1 day') g) q), '[]'),
+    'comunas', coalesce((select jsonb_agg(jsonb_build_object('c', comuna, 'n', n)) from (
+      select coalesce(comuna, 'Sin comuna') comuna, count(*) n from public.estacionamientos group by 1 order by 2 desc limit 6) q), '[]'),
+    'tablas', coalesce((select jsonb_agg(jsonb_build_object('t', c.relname, 'b', pg_total_relation_size(c.oid), 'n', greatest(c.reltuples, 0)::bigint)
+        order by pg_total_relation_size(c.oid) desc)
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r'), '[]'),
+    'servidor', jsonb_build_object(
+      'db', pg_database_size(current_database()), 'db_lim', 500 * 1024 * 1024,
+      'fotos', (select coalesce(sum((metadata ->> 'size')::bigint), 0) from storage.objects where bucket_id = 'fotos'),
+      'privado', (select coalesce(sum((metadata ->> 'size')::bigint), 0) from storage.objects where bucket_id = 'privado'),
+      'archivos', (select count(*) from storage.objects where bucket_id in ('fotos', 'privado')),
+      'st_lim', 1024 * 1024 * 1024,
+      'mensajes', (select count(*) from public.mensajes),
+      'por_borrar', (select count(*) from public.por_borrar)));
+end $$;
+
+create or replace function public.admin_usuarios(p_q text, p_filtro text, p_off int) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare q text := '%' || lower(coalesce(trim(p_q), '')) || '%';
+begin
+  perform public._solo_admin();
+  return coalesce((select jsonb_agg(x) from (
+    select jsonb_build_object('id', p.id, 'nombre', p.nombre, 'email', p.email, 'avatar', p.avatar, 'icono', p.icono, 'color', p.color,
+      'verificado', p.verificado, 'premium_hasta', p.premium_hasta, 'premium', public._premium(p), 'plan_origen', p.plan_origen,
+      'suspendido', p.suspendido, 'admin', p.es_admin, 'creado', p.creado, 'ultimo_acceso', p.ultimo_acceso, 'rut', v.rut, 'whatsapp', p.whatsapp,
+      'publicados', (select count(*) from public.estacionamientos e where e.dueno = p.id),
+      'arriendos', (select count(*) from public.arriendos a where a.arrendatario = p.id or a.dueno = p.id),
+      'denuncias', (select count(*) from public.denuncias d where d.denunciado = p.id)) x
+    from public.perfiles p left join public.verificaciones v on v.usuario = p.id
+    where (lower(p.nombre) like q or p.email like q or coalesce(v.rut, '') like upper(q))
+      and case coalesce(p_filtro, '')
+        when 'premium' then public._premium(p) and not p.es_admin
+        when 'gratis' then not public._premium(p)
+        when 'por_vencer' then p.premium_hasta between now() and now() + interval '7 days'
+        when 'inactivos' then coalesce(p.ultimo_acceso, p.creado) < now() - interval '30 days'
+        when 'verificados' then p.verificado
+        when 'sin_verificar' then not p.verificado
+        when 'suspendidos' then p.suspendido
+        else true end
+    order by p.creado desc offset greatest(coalesce(p_off, 0), 0) limit 50) q), '[]');
+end $$;
+
+-- Dar o quitar Premium por días: >0 suma días · 0 de por vida · -1 quita.
+drop function if exists public.admin_premium(uuid, int);
+create or replace function public.admin_premium(p_id uuid, p_dias int) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  update public.perfiles set
+    premium_hasta = case when p_dias < 0 then null when p_dias = 0 then 'infinity'::timestamptz
+      else greatest(now(), coalesce(premium_hasta, now())) + make_interval(days => p_dias) end,
+    plan_origen = case when p_dias < 0 then plan_origen else 'admin' end
+  where id = p_id;
+  perform public._notificar(p_id, case when p_dias < 0 then 'Tu Premium terminó' else '⭐ ¡Ya eres Premium!' end,
+    case when p_dias < 0 then 'Tu cuenta volvió al plan Gratis' else 'Disfruta todas las funciones Premium' end, '#/premium');
+end $$;
+
+drop function if exists public.admin_pagos();
+create or replace function public.admin_pagos(p_estado text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  return coalesce((select jsonb_agg(x) from (select jsonb_build_object('id', g.id, 'nota', g.nota, 'monto', g.monto, 'comprobante', g.comprobante,
+      'estado', g.estado, 'motivo', g.motivo, 'creado', g.creado, 'resuelto', g.resuelto, 'usuario', public._pj(g.usuario), 'email', p.email) x
+    from public.pagos g join public.perfiles p on p.id = g.usuario
+    where g.estado = coalesce(nullif(p_estado, ''), 'pendiente') order by g.creado desc limit 100) q), '[]');
+end $$;
+
+drop function if exists public.admin_resolver_pago(uuid, boolean);
+create or replace function public.admin_resolver_pago(p_id uuid, p_aprobar boolean, p_motivo text) returns void
+language plpgsql security definer set search_path = public as $$
+declare g public.pagos; d int := coalesce((select duracion_dias from public.planes where codigo = 'premium'), 30);
+begin
+  perform public._solo_admin();
+  select * into g from public.pagos where id = p_id and estado = 'pendiente';
+  if not found then raise exception 'Ese pago ya fue revisado'; end if;
+  update public.pagos set estado = case when p_aprobar then 'aprobado' else 'rechazado' end, resuelto = now(),
+    motivo = left(nullif(trim(p_motivo), ''), 200) where id = p_id;
+  if p_aprobar then
+    perform public.admin_premium(g.usuario, d);
+    update public.perfiles set plan_origen = 'pago' where id = g.usuario;
+  else
+    perform public._notificar(g.usuario, 'Pago no aprobado', coalesce(nullif(trim(p_motivo), ''), 'No encontramos tu pago') || '. Escríbenos a soporte.', '#/premium');
+  end if;
+end $$;
+
+create or replace function public.admin_config() returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  return jsonb_build_object(
+    'reglas', (select jsonb_object_agg(clave, valor) from public.config where clave <> 'version_bd'),
+    'textos', (select jsonb_object_agg(clave, valor) from public.textos),
+    'planes', (select jsonb_agg(to_jsonb(p) order by p.codigo desc) from public.planes p),
+    'links', (select jsonb_agg(jsonb_build_object('slot', slot, 'monto', monto, 'url', url, 'texto', texto, 'activo', activo) order by slot)
+      from public.links_pago where dueno is null and tipo = 'premium'),
+    'push', (select coalesce(valor, '') <> '' from public.ajustes where clave = 'vapid_private'),
+    'vapid_public', (select valor from public.ajustes where clave = 'vapid_public'));
+end $$;
+
+create or replace function public.admin_guardar_config(p jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare k text; v int;
+begin
+  perform public._solo_admin();
+  for k in select jsonb_object_keys(p) loop
+    if k <> 'version_bd' and exists (select 1 from public.config where clave = k) then
+      v := (p ->> k)::int;
+      if v < 0 or v > 100000 then raise exception 'Valor fuera de rango en %', k; end if;
+      update public.config set valor = to_jsonb(v) where clave = k;
+    end if;
+  end loop;
+end $$;
+
+create or replace function public.admin_guardar_textos(p jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare k text;
+begin
+  perform public._solo_admin();
+  for k in select jsonb_object_keys(p) loop
+    update public.textos set valor = left(p ->> k, 2000) where clave = k;
+  end loop;
+end $$;
+
+create or replace function public.admin_guardar_plan(p_codigo text, p_nombre text, p_descripcion text, p_limites jsonb, p_beneficios jsonb, p_duracion int) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  if jsonb_typeof(p_limites) <> 'object' or jsonb_typeof(p_beneficios) <> 'array' then raise exception 'Datos del plan no válidos'; end if;
+  update public.planes set nombre = left(coalesce(nullif(trim(p_nombre), ''), nombre), 40), descripcion = left(coalesce(p_descripcion, ''), 300),
+    limites = limites || p_limites, beneficios = p_beneficios, duracion_dias = least(greatest(coalesce(p_duracion, duracion_dias), 1), 3650)
+  where codigo = p_codigo;
+  if not found then raise exception 'Plan no encontrado'; end if;
+end $$;
+
+create or replace function public.admin_guardar_link(p_slot int, p_monto int, p_url text, p_texto text, p_activo boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._solo_admin();
+  perform public._guardar_link(null, 'premium', p_slot, p_monto, p_url, p_texto, p_activo);
+end $$;
+
+-- Aviso automático antes de que venza el Premium (y el día que vence).
+create or replace function public.avisar_vencimientos() returns void
+language plpgsql security definer set search_path = public as $$
+declare hoy date := (now() at time zone 'America/Santiago')::date; n int := public._cfg('dias_aviso_vencimiento');
+begin
+  insert into public.notificaciones (usuario, titulo, cuerpo, url)
+  select id, '⭐ Tu Premium vence en ' || n || ' día(s)', 'Renuévalo para no perder tus beneficios: toca aquí para pagar y subir el comprobante.', '#/premium'
+  from public.perfiles where not es_admin and premium_hasta < 'infinity' and (premium_hasta at time zone 'America/Santiago')::date = hoy + n;
+  insert into public.notificaciones (usuario, titulo, cuerpo, url)
+  select id, 'Tu Premium venció', 'Tu cuenta pasó a Gratis sin perder nada. Renueva cuando quieras.', '#/premium'
+  from public.perfiles where not es_admin and (premium_hasta at time zone 'America/Santiago')::date = hoy - 1;
+end $$;
+
+create or replace function public.limpieza() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.mensajes where creado < now() - make_interval(days => greatest(public._cfg('dias_mensajes'), 1));
+  delete from public.conversaciones c where c.ultimo < now() - interval '30 days'
+    and not exists (select 1 from public.mensajes m where m.conv = c.id)
+    and not exists (select 1 from public.denuncias d where d.objetivo = c.id and d.estado = 'abierta');
+  delete from public.notificaciones where (leida and creado < now() - interval '30 days') or creado < now() - interval '60 days';
+  update public.notificaciones set push_pendiente = false where push_pendiente and creado < now() - interval '1 day';
+  -- Comprobantes: la imagen se borra después de N días (el registro queda).
+  update public.arriendos set comprobante = null
+    where comprobante is not null and estado <> 'en_revision'
+      and comprobante_at < now() - make_interval(days => greatest(public._cfg('dias_comprobantes'), 1));
+  update public.pagos set comprobante = null
+    where comprobante is not null and estado <> 'pendiente'
+      and creado < now() - make_interval(days => greatest(public._cfg('dias_comprobantes'), 1));
+  delete from public.arriendos where estado in ('rechazado', 'cancelado', 'expirado') and actualizado < now() - interval '120 days'
+    and pago_estado not in ('saldo', 'devolver');
+  delete from public.pagos where estado <> 'pendiente' and creado < now() - interval '365 days';
+  delete from public.denuncias where estado <> 'abierta' and creado < now() - interval '90 days';
+end $$;
+
+-- =====================================================================
 --  Solo para la función "enviar" (clave de servidor)
 -- =====================================================================
 create or replace function public.srv_huerfanos() returns setof text
@@ -1232,50 +1705,51 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- Limpieza diaria: mantiene la base de datos liviana.
-create or replace function public.limpieza() returns void
-language sql security definer set search_path = public as $$
-  delete from public.mensajes where creado < now() - interval '30 days';
-  delete from public.conversaciones c where c.ultimo < now() - interval '30 days'
-    and not exists (select 1 from public.mensajes m where m.conv = c.id)
-    and not exists (select 1 from public.denuncias d where d.objetivo = c.id and d.estado = 'abierta');
-  delete from public.notificaciones where (leida and creado < now() - interval '30 days') or creado < now() - interval '60 days';
-  update public.notificaciones set push_pendiente = false where push_pendiente and creado < now() - interval '1 day';
-  delete from public.arriendos where estado in ('rechazado', 'cancelado') and actualizado < now() - interval '60 days';
-  delete from public.pagos where estado <> 'pendiente' and creado < now() - interval '90 days';
-  delete from public.denuncias where estado <> 'abierta' and creado < now() - interval '90 days';
-$$;
 
--- ---------- Tarea diaria (si pg_cron está disponible) ----------
+-- ---------- Tareas automáticas (pg_cron) ----------
 do $$ begin
   create extension if not exists pg_cron with schema pg_catalog;
-  perform cron.unschedule(jobid) from cron.job where jobname = 'estaciona-limpieza';
+  perform cron.unschedule(jobid) from cron.job where jobname like 'estaciona-%';
+  perform cron.schedule('estaciona-liberar', '* * * * *', 'select public.liberar_vencidas()');
   perform cron.schedule('estaciona-limpieza', '15 7 * * *', 'select public.limpieza()');
-exception when others then raise notice 'pg_cron no disponible: la limpieza se hace desde el panel (botón Limpiar).';
+  perform cron.schedule('estaciona-vencimientos', '5 13 * * *', 'select public.avisar_vencimientos()');
+exception when others then raise notice 'pg_cron no disponible: las reservas vencidas se liberan al abrir la app.';
+end $$;
+-- Push cada minuto (necesita la función "enviar" y pg_net).
+do $$ begin
+  create extension if not exists pg_net with schema extensions;
+  perform cron.schedule('estaciona-push', '* * * * *',
+    $c$select net.http_post(url := 'https://wphxtspicejywwzlbuux.supabase.co/functions/v1/enviar',
+      headers := '{"Content-Type": "application/json"}'::jsonb, body := '{"accion": "push"}'::jsonb)$c$);
+exception when others then raise notice 'pg_net no disponible: el push se envía desde la app.';
 end $$;
 
 -- ---------- Permisos ----------
 revoke all on all tables in schema public from anon, authenticated;
 revoke execute on all functions in schema public from public, anon, authenticated;
-grant execute on function public.ajustes_publicos(), public.mapa(double precision, double precision, double precision, double precision)
-  to anon, authenticated;
+grant execute on function public.ajustes_publicos(), public.mapa(double precision, double precision, double precision, double precision),
+  public.estacionamiento_detalle(uuid) to anon, authenticated;
 grant execute on function
-  public.es_admin(), public.mi_cuenta(), public.aceptar_terminos(), public.guardar_perfil(text, text, text, text, text, text),
-  public.enviar_verificacion(text, text, text, text, text), public.perfil_publico(uuid), public.canjear_key(text), public.ya_pague(text),
+  public.es_admin(), public.puede_ver_privado(text), public.mi_cuenta(), public.aceptar_terminos(),
+  public.guardar_perfil(text, text, text, text, text, text, text),
+  public.enviar_verificacion(text, text, text, text, text), public.perfil_publico(uuid), public.canjear_key(text), public.ya_pague(text, text),
   public.guardar_alerta(double precision, double precision, real), public.guardar_push(text, text, text), public.quitar_push(text),
-  public.contadores(), public.mis_notificaciones(), public.marcar_leidas(),
+  public.contadores(), public.mis_notificaciones(), public.marcar_leidas(), public.mis_links(), public.guardar_link(int, int, text, text, boolean),
   public.guardar_estacionamiento(jsonb), public.estado_estacionamiento(uuid, text), public.borrar_estacionamiento(uuid),
-  public.estacionamiento_detalle(uuid), public.mis_estacionamientos(), public.favorito(uuid), public.mis_favoritos(),
-  public.solicitar_arriendo(uuid, text, date, text), public.responder_arriendo(uuid, boolean), public.cerrar_arriendo(uuid, text),
-  public.mis_arriendos(), public.calificar(uuid, int, text),
+  public.mis_estacionamientos(), public.favorito(uuid), public.mis_favoritos(),
+  public.solicitar_arriendo(uuid, text, timestamptz, int, text), public.subir_comprobante(uuid, text),
+  public.responder_arriendo(uuid, boolean, text), public.cerrar_arriendo(uuid, text),
+  public.mis_arriendos(), public.panel(), public.mis_estadisticas(), public.calificar(uuid, int, text),
   public.abrir_conversacion(uuid), public.soporte(), public.mis_conversaciones(), public.leer_mensajes(uuid, bigint),
   public.enviar_mensaje(uuid, text), public.bloquear(uuid, boolean), public.denunciar(text, uuid, text, text, text),
   public.admin_resumen(), public.admin_usuarios(text, text, int), public.admin_premium(uuid, int), public.admin_suspender(uuid, boolean),
   public.admin_verificaciones(), public.admin_resolver_verificacion(uuid, boolean, text), public.admin_estacionamientos(text, int),
   public.admin_ocultar(uuid, boolean), public.admin_denuncias(text), public.admin_resolver_denuncia(uuid, text, text),
   public.admin_conversacion(uuid), public.admin_keys(), public.admin_crear_keys(int, int, text), public.admin_revocar_key(text),
-  public.admin_pagos(), public.admin_resolver_pago(uuid, boolean), public.admin_ajustes(), public.admin_guardar_ajustes(jsonb),
-  public.admin_aviso(text, text), public.admin_prueba_push()
+  public.admin_pagos(text), public.admin_resolver_pago(uuid, boolean, text), public.admin_ajustes(), public.admin_guardar_ajustes(jsonb),
+  public.admin_aviso(text, text), public.admin_prueba_push(), public.admin_config(), public.admin_guardar_config(jsonb),
+  public.admin_guardar_textos(jsonb), public.admin_guardar_plan(text, text, text, jsonb, jsonb, int), public.admin_guardar_link(int, int, text, text, boolean)
   to authenticated;
-grant execute on function public.srv_huerfanos(), public.limpieza() to service_role;
+grant execute on function public.srv_huerfanos(), public.limpieza(), public.liberar_vencidas() to service_role;
 
-select 'Estaciona instalada ✅' as resultado;
+select 'Estaciona v2 instalada ✅' as resultado;
