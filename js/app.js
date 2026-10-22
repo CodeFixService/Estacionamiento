@@ -634,12 +634,18 @@
       : a.verif_estado === 'pendiente' ? '<span class="pill warn">🕐 Verificación en revisión</span>'
         : '<a class="pill bad" href="#/verificar">Sin verificar · Verificar ahora</a>';
     const tema = document.documentElement.dataset.theme || '';
+    const miLink = U.enlace('#/u/' + a.id), miColor = Api.puede('qr_color') ? a.color : '#000';
     T.innerHTML = '<div class="card"><div class="row">' + avatar(a, 'lg') + '<div class="grow"><h2 style="margin:0">' + nombreCon(a) + '</h2><div class="small muted ell">' + esc(a.email) + '</div>' +
       '<div class="row wrap" style="margin-top:6px">' + planTxt(a) + ver + '</div></div></div>' +
       '<div class="row" style="margin-top:12px"><a class="btn sec grow" href="#/mas/perfil">' + ico('edit') + ' Editar perfil</a><a class="btn sec" href="#/u/' + a.id + '" aria-label="Ver mi perfil">' + ico('eye') + '</a><button class="btn sec" id="cQR" aria-label="Mi QR">' + ico('qr') + '</button></div></div>' +
       (a.suspendido ? '<div class="aviso bad" style="margin-top:12px">Tu cuenta está suspendida. Escribe a soporte.</div>' : '') +
       (!a.verificado && a.verif_estado === 'rechazada' ? '<div class="aviso bad" style="margin-top:12px">Tu verificación fue rechazada: ' + esc(a.verif_motivo || '') + '. <a href="#/verificar">Enviar de nuevo</a></div>' : '') +
       (a.admin ? '<a class="btn dark block" style="margin-top:12px" href="#/admin">' + ico('server') + ' Panel de administración</a>' : '') +
+      '<div class="sec-tit">Mi QR y link para compartir</div><div class="card center">' +
+      '<p class="small muted" style="margin-top:0">Quien lo escanee o abra el link ve tu perfil y tus estacionamientos.</p>' +
+      '<div class="qr-caja" id="cQRv"></div><p class="small" style="word-break:break-all">' + esc(miLink) + '</p>' +
+      '<div class="row"><button class="btn sec grow" id="cCop">Copiar link</button><button class="btn sec grow" id="cWA">WhatsApp</button><button class="btn grow" id="cComp">' + ico('share') + ' Compartir</button></div>' +
+      '<div class="row" style="margin-top:8px"><button class="btn sec grow" id="cDesc">' + ico('download') + ' Descargar QR</button><button class="btn line grow" id="cInv">🎁 Invitar a la app</button></div></div>' +
       '<div class="sec-tit">Mi plan</div><div class="card">' +
       '<div class="row between small"><span>Estacionamientos publicados</span><b>' + a.uso.publicados + ' / ' + a.lim.publicar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.publicados / a.lim.publicar * 100) + '%"></i></div>' +
       '<div class="row between small" style="margin-top:10px"><span>Arriendos activos</span><b>' + a.uso.arrendando + ' / ' + a.lim.arrendar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.arrendando / a.lim.arrendar * 100) + '%"></i></div>' +
@@ -663,7 +669,14 @@
     $('cTema').value = tema;
     $('cAct').onclick = () => buscarVersion(true);
     $('cTema').onchange = (e) => { U.aplicarTema(e.target.value); location.reload(); };
-    $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', U.enlace('#/u/' + a.id), Api.puede('qr_color') ? a.color : '#000');
+    $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', miLink, miColor);
+    const qr = U.qrCanvas(miLink, miColor, 600); $('cQRv').appendChild(qr);
+    const txt = '🅿️ Mira mi perfil y mis estacionamientos en *Estaciona*: ' + miLink;
+    $('cCop').onclick = async () => { try { await navigator.clipboard.writeText(miLink); toast('Link copiado'); } catch (e) { prompt('Copia el link:', miLink); } };
+    $('cWA').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
+    $('cComp').onclick = () => U.compartir(a.nombre + ' en Estaciona', txt, miLink);
+    $('cDesc').onclick = () => { const l = document.createElement('a'); l.href = qr.toDataURL('image/png'); l.download = 'estaciona-mi-qr.png'; l.click(); };
+    $('cInv').onclick = () => U.mostrarQR('Invita a Estaciona', 'Arrienda o publica estacionamientos con personas verificadas', U.enlace(''), miColor);
     if (a.alerta) $('aKm').value = String(a.alerta.km);
     $('aSet').onclick = async () => {
       if (!Api.puede('alertas')) { location.hash = '#/premium'; return; }
