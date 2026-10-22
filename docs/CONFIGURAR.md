@@ -62,3 +62,22 @@ Supabase pausa el proyecto si no hay actividad en 7 días (se reactiva con un cl
 3. El dueño aprueba (**confirmada**) o rechaza. Si no se sube el comprobante a tiempo, se **libera sola**.
 4. Cancelar: dentro de N minutos → se devuelve; con H horas o más → **saldo a favor** con ese dueño (se descuenta solo en la
    próxima reserva); con menos → se pierde. Si cancela el dueño, siempre devuelve. Todo se cambia en **Ajustes → Reglas**.
+5. **Termina sola:** cuando pasa la hora de término, la reserva confirmada queda **finalizada** (libera el cupo del plan)
+   y a ambos les llega el aviso para calificar.
+6. **Por devolver:** si el dueño no marca "Devuelto" en **Ajustes → Reglas → Días para devolver** (3 por defecto),
+   le llega un recordatorio y a ti un aviso; queda en **Administración → Resumen → 💸 Devoluciones atrasadas**.
+7. Un estacionamiento que supera el plan del dueño (por ejemplo, si se le venció Premium) no aparece en el mapa
+   y **no recibe reservas**, tampoco por link o QR.
+
+## Actualizar a la versión 2.1
+Supabase → **SQL Editor** → pega `supabase/instalar-corto.sql` → **Run** (al final dice `Estaciona v3 instalada ✅`).
+No borra datos. **Administración → Mantención** debe mostrar base de datos versión **3**.
+
+## Correo de recuperar contraseña con Gmail (recomendado)
+El correo gratis de Supabase manda muy pocos por hora. Con Gmail:
+1. En tu cuenta de Google activa la **verificación en 2 pasos** y crea una **contraseña de aplicación**
+   (myaccount.google.com → Seguridad → Contraseñas de aplicaciones).
+2. Supabase → **Authentication → Emails → SMTP Settings** → **Enable custom SMTP**:
+   host `smtp.gmail.com`, puerto `465`, usuario tu Gmail, contraseña la de aplicación,
+   remitente tu Gmail y nombre **Estaciona** → **Save**.
+3. **Authentication → Rate Limits** → sube "emails per hour" (por ejemplo a 100).

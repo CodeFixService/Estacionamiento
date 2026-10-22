@@ -879,9 +879,10 @@ insert into public.config (clave, valor) values
   ('dias_comprobantes', '30'),       -- los comprobantes se borran solos después de estos días
   ('dias_mensajes', '30'),           -- los mensajes del chat se borran solos después de estos días
   ('mensajes_seguidos', '3'),        -- mensajes seguidos sin respuesta
-  ('mensajes_dia', '100')            -- mensajes por día por persona
+  ('mensajes_dia', '100'),           -- mensajes por día por persona
+  ('dias_devolucion', '3')           -- días que tiene el dueño para devolver un pago antes de avisar al administrador
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '2') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '3') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -954,7 +955,10 @@ alter table public.arriendos
   add column if not exists pago_estado text not null default 'sin_pago',
   add column if not exists comprobante text,
   add column if not exists comprobante_at timestamptz,
-  add column if not exists motivo text;
+  add column if not exists motivo text,
+  add column if not exists devolver_desde timestamptz,
+  add column if not exists devolver_aviso timestamptz;
+update public.arriendos set devolver_desde = actualizado where pago_estado = 'devolver' and devolver_desde is null;
 alter table public.arriendos drop constraint if exists arriendos_estado_check;
 alter table public.arriendos add constraint arriendos_estado_check
   check (estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado', 'rechazado', 'cancelado', 'finalizado', 'expirado'));
@@ -966,6 +970,8 @@ update public.arriendos set inicio = coalesce(desde::timestamptz, creado),
 where inicio is null;
 create index if not exists arr_rango on public.arriendos (estacionamiento, inicio);
 create index if not exists arr_vence on public.arriendos (expira_at) where estado = 'por_pagar';
+create index if not exists arr_termina on public.arriendos (fin) where estado = 'aceptado';
+create index if not exists arr_devolver on public.arriendos (devolver_desde) where pago_estado = 'devolver';
 
 alter table public.pagos
   add column if not exists monto int not null default 0,
@@ -995,6 +1001,16 @@ $$;
 create or replace function public._puede(p public.perfiles, que text) returns boolean
 language sql stable security definer set search_path = public as $$
   select p.es_admin or coalesce((public._plan(p) ->> que)::boolean, false)
+$$;
+
+-- Se puede reservar solo si el dueño está activo y verificado, y el estacionamiento está dentro de su plan
+-- (si se le vence Premium, los que superan el límite se esconden del mapa y tampoco reciben reservas por link o QR).
+create or replace function public._reservable(e public.estacionamientos) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select not p.suspendido and (p.verificado or p.es_admin) and r.n <= public._lim(p, 'publicar')
+    from public.perfiles p
+    join (select x.id, row_number() over (order by x.creado) n from public.estacionamientos x where x.dueno = e.dueno) r on r.id = e.id
+    where p.id = e.dueno), false)
 $$;
 
 create or replace function public.puede_ver_privado(nombre text) returns boolean
@@ -1072,7 +1088,7 @@ begin
     'lat', e.lat, 'lng', e.lng, 'exacta', true, 'direccion', e.direccion,
     'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'vehiculo', e.vehiculo, 'techado', e.techado,
     'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
-    'visible', coalesce(visible, false), 'creado', e.creado, 'mio', e.dueno = me, 'logueado', me is not null,
+    'visible', coalesce(visible, false), 'reservable', public._reservable(e), 'creado', e.creado, 'mio', e.dueno = me, 'logueado', me is not null,
     'vistas', case when e.dueno = me or coalesce(yo.es_admin, false) then e.vistas end,
     'favorito', me is not null and exists (select 1 from public.favoritos f where f.usuario = me and f.estacionamiento = p_id),
     'mi_arriendo', arr, 'dueno', public._pj(e.dueno),
@@ -1089,6 +1105,7 @@ declare p public.perfiles; v public.verificaciones;
 begin
   select * into p from public.perfiles where id = auth.uid();
   if not found then return null; end if;
+  perform public.liberar_vencidas();
   update public.perfiles set ultimo_acceso = now() where id = p.id and (ultimo_acceso is null or ultimo_acceso < now() - interval '1 hour');
   select * into v from public.verificaciones where usuario = p.id;
   return public._pj(p.id) || jsonb_build_object(
@@ -1202,6 +1219,48 @@ begin
     perform public._notificar(r.arrendatario, '⌛ Tu reserva se liberó', 'No alcanzaste a subir el comprobante a tiempo', '#/reservas');
     perform public._notificar(r.dueno, 'Reserva liberada', 'Una reserva no se pagó a tiempo y se liberó', '#/reservas');
   end loop;
+  perform public.finalizar_terminados();
+  perform public.avisar_devoluciones();
+  return n;
+end $$;
+
+-- Los arriendos confirmados terminan solos al pasar su hora de término (así no bloquean el cupo del plan)
+-- y se pide la calificación a ambos.
+create or replace function public.finalizar_terminados() returns int
+language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0;
+begin
+  for r in update public.arriendos a set estado = 'finalizado', actualizado = now()
+    from public.estacionamientos e
+    where e.id = a.estacionamiento and a.estado = 'aceptado' and a.fin < now()
+    returning a.id, a.dueno, a.arrendatario, a.modalidad, a.estacionamiento, e.titulo loop
+    n := n + 1;
+    perform public._notificar(r.arrendatario, '⭐ Tu arriendo terminó', '¿Cómo te fue en "' || r.titulo || '"? Califica al dueño', '#/r/' || r.id);
+    perform public._notificar(r.dueno, '⭐ Arriendo terminado', 'Terminó el arriendo de "' || r.titulo || '". Califica a quien arrendó', '#/r/' || r.id);
+    if r.modalidad = 'mes' then
+      update public.estacionamientos set estado = 'disponible' where id = r.estacionamiento and estado = 'ocupado'
+        and not exists (select 1 from public.arriendos x where x.estacionamiento = r.estacionamiento and x.estado = 'aceptado' and x.modalidad = 'mes');
+    end if;
+  end loop;
+  return n;
+end $$;
+
+-- Pagos "por devolver" que pasan del plazo: avisa al administrador (y le recuerda al dueño), una sola vez.
+create or replace function public.avisar_devoluciones() returns int
+language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0; adm uuid := public._admin_id();
+begin
+  for r in update public.arriendos a set devolver_aviso = now()
+    from public.estacionamientos e, public.perfiles d
+    where e.id = a.estacionamiento and d.id = a.dueno and a.pago_estado = 'devolver' and a.devolver_aviso is null
+      and a.devolver_desde < now() - make_interval(days => greatest(public._cfg('dias_devolucion'), 1))
+    returning a.id, a.dueno, replace(to_char(a.monto_pagar + a.saldo_aplicado, 'FM999,999,999'), ',', '.') as monto, e.titulo, d.nombre loop
+    n := n + 1;
+    perform public._notificar(r.dueno, '💸 Tienes una devolución pendiente', 'Devuelve $' || r.monto || ' de "' || r.titulo || '" y márcalo como devuelto', '#/r/' || r.id);
+    if adm is not null and adm <> r.dueno then
+      perform public._notificar(adm, '💸 Devolución atrasada', r.nombre || ' no ha devuelto $' || r.monto || ' de "' || r.titulo || '"', '#/admin');
+    end if;
+  end loop;
   return n;
 end $$;
 
@@ -1216,6 +1275,7 @@ begin
   select * into e from public.estacionamientos where id = p_id;
   if not found or e.estado <> 'disponible' then raise exception 'Este estacionamiento no está disponible ahora'; end if;
   if e.dueno = yo.id then raise exception 'Es tu propio estacionamiento'; end if;
+  if not public._reservable(e) then raise exception 'Este estacionamiento no está recibiendo reservas por ahora'; end if;
   precio := case p_modalidad when 'hora' then e.precio_hora when 'dia' then e.precio_dia when 'mes' then e.precio_mes end;
   if coalesce(precio, 0) <= 0 then raise exception 'Este estacionamiento no se arrienda de esa forma'; end if;
   unidad := case p_modalidad when 'hora' then interval '1 hour' when 'dia' then interval '1 day' else interval '1 month' end;
@@ -1328,6 +1388,7 @@ begin
       when a.inicio - now() >= make_interval(hours => public._cfg('horas_cancelacion')) then 'saldo'
       else 'perdido' end;
     update public.arriendos set estado = 'cancelado', pago_estado = res,
+      devolver_desde = case when res = 'devolver' then now() end, devolver_aviso = null,
       saldo_monto = case when res = 'saldo' then pagado else 0 end,
       saldo_hasta = case when res = 'saldo' then now() + make_interval(days => public._cfg('dias_saldo')) end,
       actualizado = now() where id = p_id;
@@ -1508,6 +1569,10 @@ begin
     'pend_verif', (select count(*) from public.verificaciones where estado = 'pendiente'),
     'pend_denuncias', (select count(*) from public.denuncias where estado = 'abierta'),
     'pend_pagos', (select count(*) from public.pagos where estado = 'pendiente'),
+    'devoluciones', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', e.titulo, 'monto', a.monto_pagar + a.saldo_aplicado,
+        'desde', a.devolver_desde, 'dueno', public._pj(a.dueno), 'arrendatario', public._pj(a.arrendatario)) order by a.devolver_desde)
+      from public.arriendos a join public.estacionamientos e on e.id = a.estacionamiento
+      where a.pago_estado = 'devolver' and a.devolver_desde < now() - make_interval(days => greatest(public._cfg('dias_devolucion'), 1))), '[]'),
     'ingresos_mes', (select coalesce(sum(monto), 0) from public.pagos where estado = 'aprobado'
       and date_trunc('month', coalesce(resuelto, creado)) = date_trunc('month', now())),
     'keys_libres', (select count(*) from public.licencias where canjeada_por is null and not revocada),
@@ -1751,6 +1816,7 @@ grant execute on function
   public.admin_aviso(text, text), public.admin_prueba_push(), public.admin_config(), public.admin_guardar_config(jsonb),
   public.admin_guardar_textos(jsonb), public.admin_guardar_plan(text, text, text, jsonb, jsonb, int), public.admin_guardar_link(int, int, text, text, boolean)
   to authenticated;
-grant execute on function public.srv_huerfanos(), public.limpieza(), public.liberar_vencidas() to service_role;
+grant execute on function public.srv_huerfanos(), public.limpieza(), public.liberar_vencidas(),
+  public.finalizar_terminados(), public.avisar_devoluciones() to service_role;
 
-select 'Estaciona v2 instalada ✅' as resultado;
+select 'Estaciona v3 instalada ✅' as resultado;

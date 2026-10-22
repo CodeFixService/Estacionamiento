@@ -88,6 +88,7 @@
     const precios = [['hora', d.ph], ['dia', d.pd], ['mes', d.pm]].filter((p) => p[1])
       .map((p) => '<div class="precio"><b>' + clp(p[1]) + '</b><small>' + MODAL[p[0]] + '</small></div>').join('');
     const arr = d.mi_arriendo;
+    const reservable = d.estado === 'disponible' && (d.reservable ?? d.visible) !== false;
     const ocup = (d.ocupado || []).slice(0, 6);
     V.innerHTML = volver('Mapa') + '<div class="galeria">' + (fotos || '<img alt="">') + '</div>' +
       '<div class="row between" style="margin-top:14px"><h1 class="grow">' + esc(d.titulo) + '</h1>' + (d.estado !== 'disponible' ? pill(est) : '') + '</div>' +
@@ -101,6 +102,7 @@
       (ocup.length ? '<div class="sec-tit">Horarios ya reservados</div><div class="card small">' + ocup.map((o) => '<div>⛔ ' + esc(fh(o.inicio)) + ' → ' + esc(fh(o.fin)) + '</div>').join('') + '</div>' : '') +
       '<div class="sec-tit">Publicado por</div>' + (d.logueado ? '<a class="item" href="#/u/' + d.dueno.id + '">' : '<div class="item">') + avatar(d.dueno) + '<div class="grow"><b>' + nombreCon(d.dueno) + '</b><div class="small">' + estrellas(d.dueno.calif) +
       (d.dueno.calif_n ? ' <span class="muted">(' + d.dueno.calif_n + ')</span>' : '') + ' · <span class="muted">desde ' + fecha(d.dueno.desde) + '</span></div></div>' + (d.logueado ? '</a>' : '</div>') +
+      (!d.mio && !arr && d.estado === 'disponible' && !reservable ? '<div class="aviso warn" style="margin-top:12px">⏸️ Este estacionamiento no está recibiendo reservas por ahora. Puedes escribirle al dueño.</div>' : '') +
       (arr ? '<a class="aviso" style="display:block;margin-top:12px;color:var(--ink)" href="#/r/' + arr.id + '">Tu reserva: ' + pill(ESTADO_ARR[arr.estado] || ['', arr.estado]) + ' · Ver →</a>' : '') +
       (d.mio ? '<div class="sec-tit">Tu estacionamiento</div><div class="card"><div class="row between"><span>Estado</span><select id="dEstado" style="width:auto"' + (d.estado === 'oculto' ? ' disabled' : '') + '>' +
         ['disponible', 'ocupado', 'pausado'].map((s) => '<option value="' + s + '"' + (d.estado === s ? ' selected' : '') + '>' + ESTADO_EST[s][1] + '</option>').join('') + '</select></div>' +
@@ -108,8 +110,8 @@
       '<p class="small muted" style="margin-top:14px">🔒 ' + esc(Api.texto('aviso_seguridad', 'Si algo parece estafa, denúncialo con evidencia.')) + '</p>' +
       '<div class="acciones">' + (d.mio
         ? '<a class="btn grow" href="#/editar/' + d.id + '">' + ico('edit') + ' Editar</a><button class="btn sec" id="dQR" aria-label="QR">' + ico('qr') + '</button>'
-        : (!arr && d.estado === 'disponible' ? '<button class="btn grow" id="dSol">📅 Reservar</button>' : '') +
-          '<button class="btn sec' + (arr || d.estado !== 'disponible' ? ' grow' : '') + '" id="dChat">' + ico('chat') + (arr || d.estado !== 'disponible' ? ' Contactar' : '') + '</button>' +
+        : (!arr && reservable ? '<button class="btn grow" id="dSol">📅 Reservar</button>' : '') +
+          '<button class="btn sec' + (arr || !reservable ? ' grow' : '') + '" id="dChat">' + ico('chat') + (arr || !reservable ? ' Contactar' : '') + '</button>' +
           '<button class="btn sec" id="dFav" aria-label="Favorito" style="' + (d.favorito ? 'color:#e11d48' : '') + '">' + ico('heart') + '</button>' +
           '<button class="btn sec" id="dQR" aria-label="QR">' + ico('qr') + '</button>' + (d.logueado ? '<button class="btn sec" id="dDen" aria-label="Denunciar">' + ico('flag') + '</button>' : '')) + '</div>';
     U.ponerIconos(V);
@@ -284,6 +286,15 @@
       (lista.length ? lista.map(tarjetaArriendo).join('') : '<div class="vacio">' + ico('car') + '<p>' + (f === 'mias' ? 'Aún no arriendas. Busca en el mapa y reserva.' : 'Nada por aquí.') + '</p>' + (f === 'mias' ? '<a class="btn" href="#/">Ir al mapa</a>' : '') + '</div>');
     U.ponerIconos($('rsC'));
     U.centrarSeg($('rsC'));
+    pedirCalificacion(l);
+  }
+  // Un arriendo que terminó (solo o a mano) pide calificar una vez, al abrir Reservas.
+  function pedirCalificacion(l) {
+    const x = l.find((r) => r.estado === 'finalizado' && !r.calificado && Date.now() - new Date(r.fin) < 14 * 864e5);
+    if (!x) return;
+    const k = 'est:calif:' + x.id;
+    try { if (localStorage.getItem(k)) return; localStorage.setItem(k, '1'); } catch (e) { return; }
+    calificar(x.id, x.otro.nombre, () => vReservas());
   }
   async function contactar(uid) {
     try { const id = await Api.rpc('abrir_conversacion', { p_con: uid }); location.hash = '#/chat/' + id; } catch (e) { fallo(e); }
@@ -644,8 +655,9 @@
       '<div class="sec-tit">Mi QR y link para compartir</div><div class="card center">' +
       '<p class="small muted" style="margin-top:0">Quien lo escanee o abra el link ve tu perfil y tus estacionamientos.</p>' +
       '<div class="qr-caja" id="cQRv"></div><p class="small" style="word-break:break-all">' + esc(miLink) + '</p>' +
-      '<div class="row"><button class="btn sec grow" id="cCop">Copiar link</button><button class="btn sec grow" id="cWA">WhatsApp</button><button class="btn grow" id="cComp">' + ico('share') + ' Compartir</button></div>' +
-      '<div class="row" style="margin-top:8px"><button class="btn sec grow" id="cDesc">' + ico('download') + ' Descargar QR</button><button class="btn line grow" id="cInv">🎁 Invitar a la app</button></div></div>' +
+      '<button class="btn block" id="cComp">' + ico('share') + ' Compartir mi link</button>' +
+      '<div class="grid2" style="margin-top:10px"><button class="btn sec small" id="cCop">🔗 Copiar link</button><button class="btn sec small" id="cWA">📲 WhatsApp</button>' +
+      '<button class="btn sec small" id="cDesc">' + ico('download') + ' Descargar QR</button><button class="btn sec small" id="cInv">🎁 Invitar a la app</button></div></div>' +
       '<div class="sec-tit">Mi plan</div><div class="card">' +
       '<div class="row between small"><span>Estacionamientos publicados</span><b>' + a.uso.publicados + ' / ' + a.lim.publicar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.publicados / a.lim.publicar * 100) + '%"></i></div>' +
       '<div class="row between small" style="margin-top:10px"><span>Arriendos activos</span><b>' + a.uso.arrendando + ' / ' + a.lim.arrendar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.arrendando / a.lim.arrendar * 100) + '%"></i></div>' +

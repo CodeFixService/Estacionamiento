@@ -6,7 +6,7 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
-  const BD = 2; // versión de base de datos que espera esta app
+  const BD = 3; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   function marco(tab, pend) {
@@ -37,6 +37,9 @@
       C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '. Vuelve a ejecutar <b>instalar.sql</b> en Supabase.</div>' : '') +
         ((r.pend_verif || r.pend_denuncias || r.pend_pagos) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
         r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>', r.pend_pagos && '<a href="#/admin/pagos">💳 ' + r.pend_pagos + ' aviso(s) de pago</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
+        ((r.devoluciones || []).length ? '<div class="sec-tit">💸 Devoluciones atrasadas</div><div class="card stack">' + r.devoluciones.map((d) =>
+          '<div class="row between"><div class="grow small"><b>' + esc(d.dueno.nombre) + '</b> debe ' + clp(d.monto) + ' a ' + esc(d.arrendatario.nombre) +
+          '<div class="muted">"' + esc(d.titulo) + '" · desde ' + fecha(d.desde) + '</div></div><button class="btn sec small" data-dev="' + d.dueno.id + '">' + ico('chat') + ' Escribir</button></div>').join('') + '</div>' : '') +
         '<div class="kpis" style="margin-top:12px">' + [['Usuarios', r.usuarios], ['Nuevos (7 días)', r.nuevos7], ['Activos (7 días)', r.activos7], ['Verificados', r.verificados],
           ['Premium pagados', r.premium], ['En prueba 7 días', r.prueba], ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles],
           ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total], ['Ingresos del mes', clp(r.ingresos_mes)], ['Por vencer (7 días)', r.por_vencer],
@@ -53,6 +56,7 @@
         '<div class="sec-tit">Compartir la app</div><div class="card center"><div class="qr-caja" id="aQR"></div><p class="small" style="word-break:break-all">' + esc(U.enlace('')) + '</p>' +
         '<div class="row"><button class="btn sec grow" id="aWA">Enviar por WhatsApp</button><button class="btn grow" id="aComp">' + ico('share') + ' Compartir</button></div></div>';
       $('aQR').appendChild(U.qrCanvas(U.enlace(''), '#0b1020', 480));
+      C.querySelectorAll('[data-dev]').forEach((b) => { b.onclick = async () => { try { location.hash = '#/chat/' + await Api.rpc('abrir_conversacion', { p_con: b.dataset.dev }); } catch (e) { toast(e.message); } }; });
       const inv = '🅿️ Te invito a *Estaciona*: arrienda o publica estacionamientos en Santiago con personas verificadas.\n\n1. Abre: ' + U.enlace('') + '\n2. Toca "Instalar" (iPhone: Compartir → Agregar a inicio)\n3. Crea tu cuenta y tienes 7 días Premium gratis 🎁';
       $('aWA').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(inv), '_blank');
       $('aComp').onclick = () => U.compartir('Estaciona', inv, U.enlace(''));
@@ -286,7 +290,8 @@
         const etq = { minutos_pago: 'Minutos para pagar y subir el comprobante (reserva retenida)', minutos_devolucion: 'Minutos para cancelar con devolución',
           horas_cancelacion: 'Horas de anticipación para saldo a favor', dias_saldo: 'Días que dura el saldo a favor', dias_regalo: 'Días de Premium de regalo al crear una cuenta',
           dias_aviso_vencimiento: 'Días de aviso antes de que venza el Premium', dias_comprobantes: 'Días antes de borrar los comprobantes', dias_mensajes: 'Días antes de borrar los mensajes',
-          mensajes_seguidos: 'Mensajes seguidos sin respuesta', mensajes_dia: 'Mensajes por día por persona' };
+          mensajes_seguidos: 'Mensajes seguidos sin respuesta', mensajes_dia: 'Mensajes por día por persona',
+          dias_devolucion: 'Días que tiene el dueño para devolver un pago (luego te avisa)' };
         html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><input type="number" min="0" data-r="' + k + '" value="' + (a.reglas[k] ?? '') + '">').join('') +
           '<button class="btn block" id="rgOk" style="margin-top:12px">Guardar reglas</button></div>';
       } else if (sub === 'textos') {
