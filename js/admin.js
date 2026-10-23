@@ -9,6 +9,26 @@
   const BD = 3; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
+  // Base de datos: comando para copiar y botón que abre el editor SQL de Supabase con el comando ya pegado.
+  const SQL_BD = "create extension if not exists http with schema extensions;\ndo $$ begin\n  execute (select content from extensions.http_get('https://raw.githubusercontent.com/CodeFixService/Estacionamiento/main/supabase/instalar.sql'));\nend $$;";
+  const urlSQL = () => 'https://supabase.com/dashboard/project/' + new URL(g.EST_CONFIG.SUPABASE_URL).hostname.split('.')[0] + '/sql/new?content=' + encodeURIComponent(SQL_BD);
+  function cardBD(inst) {
+    const al = inst === String(BD);
+    return '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><table class="tabla"><tr><td>Instalada</td><td><b>' + esc(inst) + '</b></td></tr>' +
+      '<tr><td>La que espera la app</td><td>' + BD + '</td></tr></table>' +
+      '<p class="small">' + (al ? '✅ Al día. Se puede volver a ejecutar cuando quieras: no borra datos.' : '⚠️ Hay que actualizarla: toca <b>Abrir Supabase</b> y luego <b>Run</b>.') + '</p>' +
+      '<pre class="small" style="white-space:pre-wrap;word-break:break-all;background:var(--card2);padding:10px;border-radius:10px;user-select:all;margin:0">' + esc(SQL_BD) + '</pre>' +
+      '<div class="row" style="margin-top:10px"><button class="btn sec small grow" id="bdCop">📋 Copiar comando</button><button class="btn small grow' + (al ? ' sec' : '') + '" id="bdAbrir">↗️ Abrir Supabase</button></div>' +
+      '<p class="small muted">"Abrir Supabase" abre el editor SQL de tu proyecto con el comando ya pegado (y además lo copia): solo toca <b>Run</b>.</p></div>';
+  }
+  async function copiarSQL() { try { await navigator.clipboard.writeText(SQL_BD); return true; } catch (e) { return false; } }
+  async function accionBD(t) {
+    t = t.closest('button') || t;
+    if (t.id === 'bdCop') { toast(await copiarSQL() ? 'Comando copiado' : 'Mantén presionado el comando para copiarlo'); return true; }
+    if (t.id === 'bdAbrir') { const w = window.open(urlSQL(), '_blank'); await copiarSQL(); if (!w) location.href = urlSQL(); return true; }
+    return false;
+  }
+
   function marco(tab, pend) {
     V.innerHTML = '<div class="row between"><h1>Administración</h1><span class="chip-admin">ADMIN</span></div><div class="tabs">' +
       TABS.map((t) => '<a href="#/admin/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + (pend && pend[t[0]] ? ' <span class="pill bad" style="padding:0 6px">' + pend[t[0]] + '</span>' : '') + '</a>').join('') +
@@ -34,7 +54,7 @@
       const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
       const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
-      C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '. Vuelve a ejecutar <b>instalar.sql</b> en Supabase.</div>' : '') +
+      C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
         ((r.pend_verif || r.pend_denuncias || r.pend_pagos) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
         r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>', r.pend_pagos && '<a href="#/admin/pagos">💳 ' + r.pend_pagos + ' aviso(s) de pago</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
         ((r.devoluciones || []).length ? '<div class="sec-tit">💸 Devoluciones atrasadas</div><div class="card stack">' + r.devoluciones.map((d) =>
@@ -56,6 +76,7 @@
         '<div class="sec-tit">Compartir la app</div><div class="card center"><div class="qr-caja" id="aQR"></div><p class="small" style="word-break:break-all">' + esc(U.enlace('')) + '</p>' +
         '<div class="row"><button class="btn sec grow" id="aWA">Enviar por WhatsApp</button><button class="btn grow" id="aComp">' + ico('share') + ' Compartir</button></div></div>';
       $('aQR').appendChild(U.qrCanvas(U.enlace(''), '#0b1020', 480));
+      ['bdCop', 'bdAbrir'].forEach((id) => { if ($(id)) $(id).onclick = (e) => accionBD(e.currentTarget); });
       C.querySelectorAll('[data-dev]').forEach((b) => { b.onclick = async () => { try { location.hash = '#/chat/' + await Api.rpc('abrir_conversacion', { p_con: b.dataset.dev }); } catch (e) { toast(e.message); } }; });
       const inv = '🅿️ Te invito a *Estaciona*: arrienda o publica estacionamientos en Santiago con personas verificadas.\n\n1. Abre: ' + U.enlace('') + '\n2. Toca "Instalar" (iPhone: Compartir → Agregar a inicio)\n3. Crea tu cuenta y tienes 7 días Premium gratis 🎁';
       $('aWA').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(inv), '_blank');
@@ -305,7 +326,7 @@
       } else {
         html = '<div class="card"><h3 style="margin-top:0">🧹 Mantención</h3><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">Limpiar ahora</button></div>' +
           '<div class="card" id="mVer"><h3 style="margin-top:0">🔄 Versiones de la app</h3><p class="small">Cargando…</p></div>' +
-          '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><p class="small">Versión instalada: <b>' + esc(String((await Api.ajustes(true)).version_bd || '?')) + '</b> · esperada por la app: <b>' + BD + '</b></p></div>';
+          cardBD(String((await Api.ajustes(true)).version_bd || '?'));
       }
       C.innerHTML = nav + html;
       if ($('mVer')) {
@@ -356,6 +377,7 @@
           try { await Api.rpc('admin_guardar_textos', { p }); toast('Textos guardados'); } catch (er) { toast(er.message); }
           return;
         }
+        if (await accionBD(e.target)) return;
         if (e.target.id === 'mLimpiar') {
           e.target.disabled = true;
           try { const x = await Api.funcion('limpiar'); toast('Listo: ' + (x.borrados || 0) + ' archivos borrados'); } catch (er) { toast(er.message); }
