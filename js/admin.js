@@ -6,7 +6,7 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
-  const BD = 3; // versión de base de datos que espera esta app
+  const BD = 4; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   // Base de datos: comando para copiar y botón que abre el editor SQL de Supabase con el comando ya pegado.
@@ -150,7 +150,7 @@
       estado = estado || 'pendiente';
       const r = await Api.rpc('admin_pagos', { p_estado: estado });
       C.innerHTML = '<div class="seg">' + [['pendiente', '🧾 Por revisar'], ['aprobado', '✅ Aprobados'], ['rechazado', '❌ Rechazados']].map((t) => '<button data-e="' + t[0] + '" class="' + (t[0] === estado ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>' +
-        (r.length ? r.map((p) => '<div class="card" style="margin-top:10px" data-id="' + p.id + '"><div class="row">' + avatar(p.usuario) + '<div class="grow"><b>' + esc(p.usuario.nombre) + '</b><div class="small muted">' + esc(p.email) + ' · ' + hace(p.creado) + '</div></div><b>' + clp(p.monto) + '</b></div>' +
+        (r.length ? r.map((p) => '<div class="card" style="margin-top:10px" data-id="' + p.id + '"><div class="row">' + avatar(p.usuario) + '<div class="grow"><b>' + esc(p.usuario.nombre) + '</b><div class="small muted">' + esc(p.email) + ' · ' + hace(p.creado) + '</div></div><div style="text-align:right"><b>' + clp(p.monto) + '</b><div>' + (p.periodo === 'anual' ? '<span class="pill gold">🗓️ Anual</span>' : '<span class="pill">📅 Mensual</span>') + '</div></div></div>' +
           (p.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px">' + esc(p.nota) + '</p>' : '') +
           (p.comprobante ? '<img class="ver-img" data-priv="' + esc(p.comprobante) + '" alt="Comprobante" style="margin-top:8px"><a class="btn sec small" style="margin-top:6px" data-desc="' + esc(p.comprobante) + '">' + ico('download') + ' Descargar</a>' : '<p class="small muted">Sin comprobante (o ya se borró)</p>') +
           (p.motivo ? '<p class="small"><b>Motivo:</b> ' + esc(p.motivo) + '</p>' : '') +
@@ -290,12 +290,16 @@
       const ir = (s) => VISTAS.ajustes(C, s).then(() => { U.ponerIconos(C); U.centrarSeg(C); });
       let html = '';
       if (sub === 'precios') {
-        html = '<p class="small muted">Links de pago del Premium (te pagan a ti). Hay 2 espacios: el <b>activo</b> define el precio que ve todo el mundo.</p>' +
-          a.links.map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '"><div class="row between"><b>Espacio ' + s.slot + '</b><label class="check" style="margin:0"><input type="radio" name="alAct"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
-            '<label>Precio (CLP)</label><input class="alM" type="number" inputmode="numeric" min="0" value="' + s.monto + '">' +
-            '<label>Link de pago</label><input class="alU" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
-            '<label>Texto (opcional)</label><input class="alT" maxlength="300" placeholder="Ej: Oferta de lanzamiento" value="' + esc(s.texto) + '">' +
-            '<button class="btn block alOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
+        const espacios = (lista, tipo) => (lista || []).map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '" data-tipo="' + tipo + '"><div class="row between"><b>Espacio ' + s.slot + '</b><label class="check" style="margin:0"><input type="radio" name="alAct-' + tipo + '"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
+          '<label>Precio (CLP)</label><input class="alM" type="number" inputmode="numeric" min="0" value="' + s.monto + '">' +
+          '<label>Link de pago</label><input class="alU" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
+          '<label>Texto (opcional)</label><input class="alT" maxlength="300" placeholder="Ej: Oferta de lanzamiento" value="' + esc(s.texto) + '">' +
+          '<button class="btn block alOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
+        html = '<p class="small muted">Links de pago del Premium (te pagan a ti). Cada plan tiene 2 espacios: el <b>activo</b> define el precio que ve todo el mundo.</p>' +
+          '<div class="sec-tit">📅 Premium mensual · ' + ((a.planes || []).find((p) => p.codigo === 'premium') || {}).duracion_dias + ' días</div>' + espacios(a.links, 'premium') +
+          '<div class="sec-tit">🗓️ Premium anual · ' + (a.reglas.dias_anual ?? 365) + ' días</div>' +
+          (a.links_anual ? '<p class="small muted">Con precio 0 en el espacio activo, el plan anual no se muestra. Los días se cambian en <b>Reglas</b>.</p>' + espacios(a.links_anual, 'premium_anual')
+            : '<div class="aviso warn">Actualiza la base de datos (Mantención) para activar el plan anual.</div>');
       } else if (sub === 'planes') {
         const etq = { publicar: 'Estacionamientos publicados', arrendar: 'Arriendos activos a la vez', fotos: 'Fotos por estacionamiento', favoritos: 'Favoritos (500 = ilimitado)',
           destacado: 'Pin dorado destacado', estadisticas: 'Estadísticas', alertas: 'Alerta de zona', color_libre: 'Color libre (RGB)', qr_color: 'QR con su color' };
@@ -312,7 +316,7 @@
           horas_cancelacion: 'Horas de anticipación para saldo a favor', dias_saldo: 'Días que dura el saldo a favor', dias_regalo: 'Días de Premium de regalo al crear una cuenta',
           dias_aviso_vencimiento: 'Días de aviso antes de que venza el Premium', dias_comprobantes: 'Días antes de borrar los comprobantes', dias_mensajes: 'Días antes de borrar los mensajes',
           mensajes_seguidos: 'Mensajes seguidos sin respuesta', mensajes_dia: 'Mensajes por día por persona',
-          dias_devolucion: 'Días que tiene el dueño para devolver un pago (luego te avisa)' };
+          dias_devolucion: 'Días que tiene el dueño para devolver un pago (luego te avisa)', dias_anual: 'Días de Premium que entrega el pago anual' };
         html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><input type="number" min="0" data-r="' + k + '" value="' + (a.reglas[k] ?? '') + '">').join('') +
           '<button class="btn block" id="rgOk" style="margin-top:12px">Guardar reglas</button></div>';
       } else if (sub === 'textos') {
@@ -353,7 +357,9 @@
         const al = e.target.closest('.alOk');
         if (al) {
           const c = al.closest('[data-slot]');
-          try { await Api.rpc('admin_guardar_link', { p_slot: +c.dataset.slot, p_monto: +c.querySelector('.alM').value || 0, p_url: c.querySelector('.alU').value, p_texto: c.querySelector('.alT').value, p_activo: c.querySelector('input[type=radio]').checked }); toast('Guardado'); ir('precios'); } catch (er) { toast(er.message); }
+          const arg = { p_slot: +c.dataset.slot, p_monto: +c.querySelector('.alM').value || 0, p_url: c.querySelector('.alU').value, p_texto: c.querySelector('.alT').value, p_activo: c.querySelector('input[type=radio]').checked };
+          if (c.dataset.tipo === 'premium_anual') arg.p_tipo = 'premium_anual';
+          try { await Api.rpc('admin_guardar_link', arg); toast('Guardado'); ir('precios'); } catch (er) { toast(er.message); }
           return;
         }
         const pl = e.target.closest('.plOk');

@@ -41,7 +41,11 @@ Branch **main** y carpeta **/ (root)** → **Save**. En 1–2 minutos queda en:
 4. **Cuenta → Notificaciones en este celular → Activar**.
 
 ## Cómo se vende Premium
-- La persona toca **Comprar Premium** (abre tu link de pago) y luego **Ya pagué**.
+- Hay **Premium mensual** y **Premium anual**, cada uno con 2 espacios de link de pago y su propio precio
+  (**Administración → Ajustes → Precios y links**; el espacio activo es el que se cobra). El anual entrega 365 días
+  (se cambia en **Reglas**) y solo aparece si su espacio activo tiene precio.
+- La persona elige Mensual o Anual, toca **Pagar** (abre tu link de pago) y sube el comprobante.
+  En **Pagos** ves si es mensual o anual y al aprobar se dan los días que corresponden.
 - Te llega a **Administración → Pagos**: apruebas y se activa solo. O creas una **Key** y se la mandas por WhatsApp.
 - En **Usuarios** puedes dar +1/+3/+12 meses, de por vida, quitar Premium, suspender o eliminar cuentas.
 
@@ -69,9 +73,9 @@ Supabase pausa el proyecto si no hay actividad en 7 días (se reactiva con un cl
 7. Un estacionamiento que supera el plan del dueño (por ejemplo, si se le venció Premium) no aparece en el mapa
    y **no recibe reservas**, tampoco por link o QR.
 
-## Actualizar a la versión 2.1
-Supabase → **SQL Editor** → pega `supabase/instalar-corto.sql` → **Run** (al final dice `Estaciona v3 instalada ✅`).
-No borra datos. **Administración → Mantención** debe mostrar base de datos versión **3**.
+## Actualizar la base de datos
+**Administración → Ajustes → Mantención → Abrir Supabase** → **Run** (o pega `supabase/instalar-corto.sql` en el SQL Editor).
+No borra datos. La tarjeta **Base de datos** debe mostrar la misma versión instalada que espera la app (hoy **4**).
 
 ## Correo de recuperar contraseña con Gmail (recomendado)
 El correo gratis de Supabase manda muy pocos por hora. Con Gmail:

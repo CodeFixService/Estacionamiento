@@ -792,27 +792,42 @@
     T = T || V;
     const aj = await Api.ajustes(true), a = Api.cuenta;
     const pl = aj.planes || {}, gr = (pl.gratis || {}).limites || {}, pr = (pl.premium || {}).limites || {};
-    const dur = (pl.premium || {}).duracion_dias || 30;
+    const dur = (pl.premium || {}).duracion_dias || 30, an = aj.anual;
+    // Mensual o anual (el anual aparece solo si el admin le puso precio).
+    const ops = { mes: { precio: aj.precio || 0, link: aj.link_pago, texto: aj.texto_pago, dias: dur, nom: 'Mensual' } };
+    if (an) ops.anual = { precio: an.precio, link: an.link_pago, texto: an.texto_pago, dias: an.dias || 365, nom: 'Anual' };
+    let per = 'mes';
+    const ahorro = an && aj.precio ? Math.round((1 - an.precio / (aj.precio * (ops.anual.dias / dur))) * 100) : 0;
     const v = (x) => x === true ? '✓' : x === false || x == null ? '—' : x >= 500 ? 'Ilimitados' : x;
     const filas = [['Estacionamientos publicados', 'publicar'], ['Arriendos activos a la vez', 'arrendar'], ['Fotos por estacionamiento', 'fotos'], ['Favoritos', 'favoritos'],
       ['Pin dorado destacado', 'destacado'], ['Estadísticas', 'estadisticas'], ['Alerta de zona', 'alertas'], ['Color libre (RGB)', 'color_libre'], ['QR con tu color', 'qr_color']];
     T.innerHTML = '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>' + esc(Api.texto('premium_titulo', 'Estaciona Premium')) + '</h1>' +
-      '<p style="opacity:.85">' + esc(Api.texto('premium_texto', '')) + '</p><div style="font-size:34px;font-weight:900">' + clp(aj.precio || 0) + '</div>' +
-      '<div class="small" style="opacity:.8">' + dur + ' días de Premium' + (aj.texto_pago ? ' · ' + esc(aj.texto_pago) : '') + '</div></div>' +
+      '<p style="opacity:.85">' + esc(Api.texto('premium_texto', '')) + '</p>' +
+      (an ? '<div class="seg" id="prPer" style="justify-content:center;margin:4px 0 10px"><button data-p="mes" class="on">📅 Mensual</button><button data-p="anual">🗓️ Anual' + (ahorro > 0 ? ' · ahorra ' + ahorro + '%' : '') + '</button></div>' : '') +
+      '<div style="font-size:34px;font-weight:900" id="prPrecio"></div><div class="small" style="opacity:.8" id="prDur"></div></div>' +
       (a && a.premium && !a.admin ? '<div class="aviso" style="margin-top:12px">' + planTxt(a) + (a.premium_hasta && !/infinity/i.test(String(a.premium_hasta)) ? ' Vence el ' + fecha(a.premium_hasta) + '.' : '') + '</div>' : '') +
       '<div class="card" style="margin-top:12px"><b>Incluye</b><ul class="small" style="margin:8px 0 0;padding-left:18px">' + ((pl.premium || {}).beneficios || []).map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' +
       '<table class="tabla card" style="margin-top:12px;padding:0"><tr><th></th><th>' + esc((pl.gratis || {}).nombre || 'Gratis') + '</th><th style="color:var(--gold)">' + esc((pl.premium || {}).nombre || 'Premium') + '</th></tr>' +
       filas.map((f) => '<tr><td>' + f[0] + '</td><td>' + v(gr[f[1]]) + '</td><td><b>' + v(pr[f[1]]) + '</b></td></tr>').join('') + '</table>' +
       '<div class="card" style="margin-top:12px"><b>Cómo activarlo</b><p class="small muted" style="margin:6px 0 10px">' + esc(Api.texto('pago_instrucciones', '')) + '</p>' +
-      '<button class="btn gold block" id="prComprar">💳 Pagar ' + clp(aj.precio || 0) + '</button>' +
+      '<button class="btn gold block" id="prComprar"></button>' +
       '<label>Foto del comprobante</label><input type="file" id="prComp" accept="image/*"><input id="prNota" placeholder="Nota (opcional): nombre de quien pagó" maxlength="200" style="margin-top:8px">' +
       '<button class="btn block" id="prPague" style="margin-top:10px">📤 Enviar comprobante</button></div>' +
       '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>';
     U.ponerIconos(T);
+    const pintar = () => {
+      const o = ops[per];
+      $('prPrecio').textContent = clp(o.precio);
+      $('prDur').textContent = o.dias + ' días de Premium' + (o.texto ? ' · ' + o.texto : '');
+      $('prComprar').textContent = '💳 Pagar ' + clp(o.precio) + (an ? ' (' + o.nom.toLowerCase() + ')' : '');
+      if ($('prPer')) $('prPer').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.p === per));
+    };
+    pintar();
+    if ($('prPer')) $('prPer').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { per = b.dataset.p; pintar(); } };
     $('prComprar').onclick = () => {
       if (!Api.logueado()) return pedirLogin('Crea tu cuenta para comprar Premium');
-      if (!aj.link_pago) { toast('El link de pago estará disponible pronto. Escribe a soporte.'); return; }
-      window.open(aj.link_pago, '_blank', 'noopener');
+      if (!ops[per].link) { toast('El link de pago estará disponible pronto. Escribe a soporte.'); return; }
+      window.open(ops[per].link, '_blank', 'noopener');
     };
     $('prPague').onclick = async (e) => {
       if (!Api.logueado()) return pedirLogin();
@@ -820,7 +835,7 @@
       e.target.disabled = true; e.target.textContent = 'Enviando…';
       try {
         const ruta = await U.subirFoto(f, 'privado', { lado: 1280, calidad: 0.7 });
-        await Api.rpc('ya_pague', { p_nota: $('prNota').value, p_comprobante: ruta }); Api.empujar(); toast('¡Comprobante enviado! Te avisamos al aprobarlo');
+        await Api.rpc('ya_pague', Object.assign({ p_nota: $('prNota').value, p_comprobante: ruta }, per === 'anual' ? { p_periodo: 'anual' } : {})); Api.empujar(); toast('¡Comprobante enviado! Te avisamos al aprobarlo');
       } catch (er) { toast(er.message); }
       e.target.disabled = false; e.target.textContent = '📤 Enviar comprobante';
     };

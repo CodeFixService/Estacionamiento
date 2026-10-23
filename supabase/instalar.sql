@@ -880,9 +880,10 @@ insert into public.config (clave, valor) values
   ('dias_mensajes', '30'),           -- los mensajes del chat se borran solos después de estos días
   ('mensajes_seguidos', '3'),        -- mensajes seguidos sin respuesta
   ('mensajes_dia', '100'),           -- mensajes por día por persona
-  ('dias_devolucion', '3')           -- días que tiene el dueño para devolver un pago antes de avisar al administrador
+  ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
+  ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '3') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '4') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -921,7 +922,7 @@ alter table public.planes enable row level security;
 create table if not exists public.links_pago (
   id          uuid primary key default gen_random_uuid(),
   dueno       uuid references public.perfiles (id) on delete cascade,
-  tipo        text not null check (tipo in ('arriendo', 'premium')),
+  tipo        text not null check (tipo in ('arriendo', 'premium', 'premium_anual')),
   slot        smallint not null check (slot in (1, 2)),
   monto       int not null default 0 check (monto >= 0 and monto <= 5000000),
   url         text not null default '' check (url = '' or url ~ '^https://'),
@@ -939,6 +940,12 @@ select null, 'premium', s,
   s = 1
 from generate_series(1, 2) s
 where not exists (select 1 from public.links_pago l where l.dueno is null and l.tipo = 'premium' and l.slot = s);
+-- Premium anual: "premium" es el mensual; "premium_anual" tiene sus propios 2 espacios y precio.
+alter table public.links_pago drop constraint if exists links_pago_tipo_check;
+alter table public.links_pago add constraint links_pago_tipo_check check (tipo in ('arriendo', 'premium', 'premium_anual'));
+insert into public.links_pago (dueno, tipo, slot, monto, activo)
+select null, 'premium_anual', s, 0, s = 1 from generate_series(1, 2) s
+where not exists (select 1 from public.links_pago l where l.dueno is null and l.tipo = 'premium_anual' and l.slot = s);
 
 alter table public.perfiles add column if not exists whatsapp text;
 
@@ -977,7 +984,10 @@ alter table public.pagos
   add column if not exists monto int not null default 0,
   add column if not exists comprobante text,
   add column if not exists motivo text,
-  add column if not exists resuelto timestamptz;
+  add column if not exists resuelto timestamptz,
+  add column if not exists periodo text not null default 'mes';
+alter table public.pagos drop constraint if exists pagos_periodo_check;
+alter table public.pagos add constraint pagos_periodo_check check (periodo in ('mes', 'anual'));
 
 -- Ubicación exacta: el pin queda justo en el estacionamiento.
 update public.estacionamientos set lat_pub = lat, lng_pub = lng where lat_pub is distinct from lat or lng_pub is distinct from lng;
@@ -1042,9 +1052,12 @@ language sql stable security definer set search_path = public as $$
     'reglas', (select jsonb_object_agg(clave, valor) from public.config where clave <> 'version_bd'),
     'textos', (select jsonb_object_agg(clave, valor) from public.textos),
     'planes', (select jsonb_object_agg(codigo, jsonb_build_object('nombre', nombre, 'descripcion', descripcion, 'limites', limites,
-      'beneficios', beneficios, 'duracion_dias', duracion_dias)) from public.planes))
+      'beneficios', beneficios, 'duracion_dias', duracion_dias)) from public.planes),
+    'anual', case when coalesce(la.monto, 0) > 0 then jsonb_build_object('precio', la.monto, 'link_pago', la.url, 'texto_pago', la.texto,
+      'dias', public._cfg('dias_anual')) end)
   from (select 1) x
   left join lateral (select * from public.links_pago where dueno is null and tipo = 'premium' and activo order by slot limit 1) l on true
+  left join lateral (select * from public.links_pago where dueno is null and tipo = 'premium_anual' and activo order by slot limit 1) la on true
 $$;
 
 create or replace function public.mapa(p_s double precision, p_w double precision, p_n double precision, p_e double precision)
@@ -1150,17 +1163,21 @@ begin
 end $$;
 
 drop function if exists public.ya_pague(text);
-create or replace function public.ya_pague(p_nota text, p_comprobante text) returns void
+drop function if exists public.ya_pague(text, text);
+create or replace function public.ya_pague(p_nota text, p_comprobante text, p_periodo text default 'mes') returns void
 language plpgsql security definer set search_path = public as $$
-declare p public.perfiles := public._yo(); l public.links_pago;
+declare p public.perfiles := public._yo(); l public.links_pago; per text := case when p_periodo = 'anual' then 'anual' else 'mes' end;
 begin
   if coalesce(p_comprobante, '') !~ ('^' || p.id || '/[A-Za-z0-9._-]+$') then raise exception 'Sube la foto del comprobante'; end if;
   if exists (select 1 from public.pagos where usuario = p.id and estado = 'pendiente') then
     raise exception 'Ya enviaste un comprobante. El administrador lo revisará pronto.';
   end if;
-  select * into l from public.links_pago where dueno is null and tipo = 'premium' and activo order by slot limit 1;
-  insert into public.pagos (usuario, nota, monto, comprobante) values (p.id, left(p_nota, 200), coalesce(l.monto, 0), p_comprobante);
-  perform public._notificar(public._admin_id(), '💳 Comprobante de Premium', p.nombre || ' subió su comprobante', '#/admin/pagos');
+  select * into l from public.links_pago where dueno is null and tipo = case per when 'anual' then 'premium_anual' else 'premium' end
+    and activo order by slot limit 1;
+  if per = 'anual' and coalesce(l.monto, 0) = 0 then raise exception 'El plan anual no está disponible ahora'; end if;
+  insert into public.pagos (usuario, nota, monto, comprobante, periodo) values (p.id, left(p_nota, 200), coalesce(l.monto, 0), p_comprobante, per);
+  perform public._notificar(public._admin_id(), '💳 Comprobante de Premium ' || case per when 'anual' then 'anual' else 'mensual' end,
+    p.nombre || ' subió su comprobante', '#/admin/pagos');
 end $$;
 
 -- ---------- Links de pago del dueño ----------
@@ -1642,7 +1659,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   perform public._solo_admin();
   return coalesce((select jsonb_agg(x) from (select jsonb_build_object('id', g.id, 'nota', g.nota, 'monto', g.monto, 'comprobante', g.comprobante,
-      'estado', g.estado, 'motivo', g.motivo, 'creado', g.creado, 'resuelto', g.resuelto, 'usuario', public._pj(g.usuario), 'email', p.email) x
+      'estado', g.estado, 'motivo', g.motivo, 'creado', g.creado, 'periodo', g.periodo, 'resuelto', g.resuelto, 'usuario', public._pj(g.usuario), 'email', p.email) x
     from public.pagos g join public.perfiles p on p.id = g.usuario
     where g.estado = coalesce(nullif(p_estado, ''), 'pendiente') order by g.creado desc limit 100) q), '[]');
 end $$;
@@ -1650,11 +1667,13 @@ end $$;
 drop function if exists public.admin_resolver_pago(uuid, boolean);
 create or replace function public.admin_resolver_pago(p_id uuid, p_aprobar boolean, p_motivo text) returns void
 language plpgsql security definer set search_path = public as $$
-declare g public.pagos; d int := coalesce((select duracion_dias from public.planes where codigo = 'premium'), 30);
+declare g public.pagos; d int;
 begin
   perform public._solo_admin();
   select * into g from public.pagos where id = p_id and estado = 'pendiente';
   if not found then raise exception 'Ese pago ya fue revisado'; end if;
+  d := case when g.periodo = 'anual' then greatest(public._cfg('dias_anual'), 1)
+    else coalesce((select duracion_dias from public.planes where codigo = 'premium'), 30) end;
   update public.pagos set estado = case when p_aprobar then 'aprobado' else 'rechazado' end, resuelto = now(),
     motivo = left(nullif(trim(p_motivo), ''), 200) where id = p_id;
   if p_aprobar then
@@ -1675,6 +1694,8 @@ begin
     'planes', (select jsonb_agg(to_jsonb(p) order by p.codigo desc) from public.planes p),
     'links', (select jsonb_agg(jsonb_build_object('slot', slot, 'monto', monto, 'url', url, 'texto', texto, 'activo', activo) order by slot)
       from public.links_pago where dueno is null and tipo = 'premium'),
+    'links_anual', (select jsonb_agg(jsonb_build_object('slot', slot, 'monto', monto, 'url', url, 'texto', texto, 'activo', activo) order by slot)
+      from public.links_pago where dueno is null and tipo = 'premium_anual'),
     'push', (select coalesce(valor, '') <> '' from public.ajustes where clave = 'vapid_private'),
     'vapid_public', (select valor from public.ajustes where clave = 'vapid_public'));
 end $$;
@@ -1714,11 +1735,13 @@ begin
   if not found then raise exception 'Plan no encontrado'; end if;
 end $$;
 
-create or replace function public.admin_guardar_link(p_slot int, p_monto int, p_url text, p_texto text, p_activo boolean) returns void
+drop function if exists public.admin_guardar_link(int, int, text, text, boolean);
+create or replace function public.admin_guardar_link(p_slot int, p_monto int, p_url text, p_texto text, p_activo boolean, p_tipo text default 'premium') returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._solo_admin();
-  perform public._guardar_link(null, 'premium', p_slot, p_monto, p_url, p_texto, p_activo);
+  if coalesce(p_tipo, '') not in ('premium', 'premium_anual') then raise exception 'Tipo de link no válido'; end if;
+  perform public._guardar_link(null, p_tipo, p_slot, p_monto, p_url, p_texto, p_activo);
 end $$;
 
 -- Aviso automático antes de que venza el Premium (y el día que vence).
@@ -1798,7 +1821,7 @@ grant execute on function public.ajustes_publicos(), public.mapa(double precisio
 grant execute on function
   public.es_admin(), public.puede_ver_privado(text), public.mi_cuenta(), public.aceptar_terminos(),
   public.guardar_perfil(text, text, text, text, text, text, text),
-  public.enviar_verificacion(text, text, text, text, text), public.perfil_publico(uuid), public.canjear_key(text), public.ya_pague(text, text),
+  public.enviar_verificacion(text, text, text, text, text), public.perfil_publico(uuid), public.canjear_key(text), public.ya_pague(text, text, text),
   public.guardar_alerta(double precision, double precision, real), public.guardar_push(text, text, text), public.quitar_push(text),
   public.contadores(), public.mis_notificaciones(), public.marcar_leidas(), public.mis_links(), public.guardar_link(int, int, text, text, boolean),
   public.guardar_estacionamiento(jsonb), public.estado_estacionamiento(uuid, text), public.borrar_estacionamiento(uuid),
@@ -1814,9 +1837,9 @@ grant execute on function
   public.admin_conversacion(uuid), public.admin_keys(), public.admin_crear_keys(int, int, text), public.admin_revocar_key(text),
   public.admin_pagos(text), public.admin_resolver_pago(uuid, boolean, text), public.admin_ajustes(), public.admin_guardar_ajustes(jsonb),
   public.admin_aviso(text, text), public.admin_prueba_push(), public.admin_config(), public.admin_guardar_config(jsonb),
-  public.admin_guardar_textos(jsonb), public.admin_guardar_plan(text, text, text, jsonb, jsonb, int), public.admin_guardar_link(int, int, text, text, boolean)
+  public.admin_guardar_textos(jsonb), public.admin_guardar_plan(text, text, text, jsonb, jsonb, int), public.admin_guardar_link(int, int, text, text, boolean, text)
   to authenticated;
 grant execute on function public.srv_huerfanos(), public.limpieza(), public.liberar_vencidas(),
   public.finalizar_terminados(), public.avisar_devoluciones() to service_role;
 
-select 'Estaciona v3 instalada ✅' as resultado;
+select 'Estaciona v4 instalada ✅' as resultado;
