@@ -464,7 +464,8 @@
     ['plan', '⭐ Plan'], ['estadisticas', '📊 Estadísticas'], ['cuenta', '⚙️ Mi cuenta']];
   async function vMas(sub) {
     sub = sub || 'cuenta';
-    V.innerHTML = '<div class="seg">' + SUBS.map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
+    if (sub === 'plan' && Api.admin()) sub = 'cuenta';
+    V.innerHTML = '<div class="seg">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
     const T = $('masC');
     U.centrarSeg(V);
     try {
@@ -658,10 +659,10 @@
       '<button class="btn block" id="cComp">' + ico('share') + ' Compartir mi link</button>' +
       '<div class="grid2" style="margin-top:10px"><button class="btn sec small" id="cCop">🔗 Copiar link</button><button class="btn sec small" id="cWA">📲 WhatsApp</button>' +
       '<button class="btn sec small" id="cDesc">' + ico('download') + ' Descargar QR</button><button class="btn sec small" id="cInv">🎁 Invitar a la app</button></div></div>' +
-      '<div class="sec-tit">Mi plan</div><div class="card">' +
+      (a.admin ? '' : '<div class="sec-tit">Mi plan</div><div class="card">' +
       '<div class="row between small"><span>Estacionamientos publicados</span><b>' + a.uso.publicados + ' / ' + a.lim.publicar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.publicados / a.lim.publicar * 100) + '%"></i></div>' +
       '<div class="row between small" style="margin-top:10px"><span>Arriendos activos</span><b>' + a.uso.arrendando + ' / ' + a.lim.arrendar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.arrendando / a.lim.arrendar * 100) + '%"></i></div>' +
-      (a.admin ? '' : '<a class="btn ' + (a.premium ? 'sec' : 'gold') + ' block" style="margin-top:14px" href="#/premium">' + (a.premium ? 'Ver mi Premium' : '⭐ Hazte Premium') + '</a>') + '</div>' +
+      '<a class="btn ' + (a.premium ? 'sec' : 'gold') + ' block" style="margin-top:14px" href="#/premium">' + (a.premium ? 'Ver mi Premium' : '⭐ Hazte Premium') + '</a></div>') +
       '<div class="sec-tit">Alerta de zona ' + (Api.puede('alertas') ? '' : '<span class="pill gold">Premium</span>') + '</div><div class="card' + (Api.puede('alertas') ? '' : ' candado') + '">' +
       '<p class="small" style="margin-top:0">Te avisamos cuando publiquen un estacionamiento cerca de la zona que elijas.</p>' +
       (a.alerta ? '<p class="small"><b>Activa:</b> radio de ' + a.alerta.km + ' km.</p>' : '') +
@@ -798,10 +799,26 @@
     if (an) ops.anual = { precio: an.precio, link: an.link_pago, texto: an.texto_pago, dias: an.dias || 365, nom: 'Anual' };
     let per = 'mes';
     const ahorro = an && aj.precio ? Math.round((1 - an.precio / (aj.precio * (ops.anual.dias / dur))) * 100) : 0;
+    // Admin: vende, no compra. Premium vitalicio: nada que comprar. Premium pagado: la venta queda tras "Renovar"
+    // (se muestra sola cuando faltan pocos días). Prueba y Gratis: ven los planes para comprar.
+    const vitalicio = a && a.premium && /infinity/i.test(String(a.premium_hasta));
+    const diasRest = a && a.premium && a.premium_hasta && !vitalicio ? Math.ceil((new Date(a.premium_hasta) - Date.now()) / 864e5) : 0;
+    const modo = a && a.admin ? 'admin' : vitalicio ? 'vitalicio'
+      : a && a.premium && a.plan_origen !== 'prueba' && diasRest > ((aj.reglas || {}).dias_aviso_vencimiento || 3) ? 'activo' : 'comprar';
     const v = (x) => x === true ? '✓' : x === false || x == null ? '—' : x >= 500 ? 'Ilimitados' : x;
     const filas = [['Estacionamientos publicados', 'publicar'], ['Arriendos activos a la vez', 'arrendar'], ['Fotos por estacionamiento', 'fotos'], ['Favoritos', 'favoritos'],
       ['Pin dorado destacado', 'destacado'], ['Estadísticas', 'estadisticas'], ['Alerta de zona', 'alertas'], ['Color libre (RGB)', 'color_libre'], ['QR con tu color', 'qr_color']];
-    T.innerHTML = '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>' + esc(Api.texto('premium_titulo', 'Estaciona Premium')) + '</h1>' +
+    const heroIni = '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>';
+    const incluye = '<div class="card" style="margin-top:12px"><b>Incluye</b><ul class="small" style="margin:8px 0 0;padding-left:18px">' + ((pl.premium || {}).beneficios || []).map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>';
+    if (modo === 'admin' || modo === 'vitalicio') {
+      T.innerHTML = heroIni + (modo === 'admin' ? 'Tienes todo incluido</h1><p style="opacity:.85">Eres el administrador: tú vendes Premium. Los precios y links de pago se cambian en Administración.</p>' +
+          '<a class="btn gold" href="#/admin/ajustes">💳 Precios y links</a></div>'
+        : 'Premium de por vida</h1><p style="opacity:.85">Tienes todas las funciones Premium para siempre. ¡Gracias!</p></div>') + incluye;
+      return;
+    }
+    T.innerHTML = (modo === 'activo' ? heroIni + 'Ya eres Premium ✓</h1><p style="opacity:.85">Vence el ' + fecha(a.premium_hasta) + ' (' + diasRest + ' días). Te avisaremos antes de que venza.</p>' +
+        '<button class="btn sec" id="prRenovar">🔄 Renovar por adelantado</button></div><div id="prVenta" hidden style="margin-top:12px">' : '') +
+      heroIni + esc(Api.texto('premium_titulo', 'Estaciona Premium')) + '</h1>' +
       '<p style="opacity:.85">' + esc(Api.texto('premium_texto', '')) + '</p>' +
       (an ? '<div class="seg" id="prPer" style="justify-content:center;margin:4px 0 10px"><button data-p="mes" class="on">📅 Mensual</button><button data-p="anual">🗓️ Anual' + (ahorro > 0 ? ' · ahorra ' + ahorro + '%' : '') + '</button></div>' : '') +
       '<div style="font-size:34px;font-weight:900" id="prPrecio"></div><div class="small" style="opacity:.8" id="prDur"></div></div>' +
@@ -813,8 +830,10 @@
       '<button class="btn gold block" id="prComprar"></button>' +
       '<label>Foto del comprobante</label><input type="file" id="prComp" accept="image/*"><input id="prNota" placeholder="Nota (opcional): nombre de quien pagó" maxlength="200" style="margin-top:8px">' +
       '<button class="btn block" id="prPague" style="margin-top:10px">📤 Enviar comprobante</button></div>' +
-      '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>';
+      '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>' +
+      (modo === 'activo' ? '</div>' : '');
     U.ponerIconos(T);
+    if ($('prRenovar')) $('prRenovar').onclick = () => { $('prVenta').hidden = false; $('prRenovar').hidden = true; $('prVenta').scrollIntoView({ behavior: 'smooth' }); };
     const pintar = () => {
       const o = ops[per];
       $('prPrecio').textContent = clp(o.precio);
