@@ -1,9 +1,9 @@
 /* Service worker de Estaciona: guarda la app en el celular para que abra rápido.
    Al publicar una versión nueva, cambia VERSION: la app muestra "Actualizar". */
-const VERSION = 'est-2.2.2';
+const VERSION = 'est-2.2.3';
 const ARCHIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/config.js', 'js/base.js', 'js/iconos.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
+  'js/config.js', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
   'vendor/supabase.js', 'vendor/591.supabase.js', 'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css', 'vendor/leaflet-maplibre-gl.js',
   'vendor/leaflet.markercluster.js', 'vendor/MarkerCluster.css', 'vendor/qrcode.js',
   'icons/icon-192.png', 'icons/icon-512.png'
