@@ -5,7 +5,7 @@ window.EST_CONFIG = {
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwaHh0c3BpY2VqeXd3emxidXV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4MjU4OTEsImV4cCI6MjEwNzQwMTg5MX0.coQrJqkMbwHdf-E9IgpQ97T4SHAI8LKao3zZAgcZsko',
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'Estaciona',
-  AUTOR: 'CodeFix · Josué Castillo',
+  AUTOR: 'CodeFix',
   VERSION: '2.3.0',
   // Mapa: Santiago por defecto. OpenFreeMap (vectorial) y OpenStreetMap de respaldo: gratis y sin API key.
   CENTRO: [-33.4489, -70.6693],
