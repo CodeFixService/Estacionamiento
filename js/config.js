@@ -6,7 +6,7 @@ window.EST_CONFIG = {
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'Estaciona',
   AUTOR: 'CodeFix',
-  VERSION: '2.3.0',
+  VERSION: '2.3.1',
   // Mapa: Santiago por defecto. OpenFreeMap (vectorial) y OpenStreetMap de respaldo: gratis y sin API key.
   CENTRO: [-33.4489, -70.6693],
   ZOOM: 12,

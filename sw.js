@@ -1,6 +1,6 @@
 /* Service worker de Estaciona: guarda la app en el celular para que abra rápido.
    Al publicar una versión nueva, cambia VERSION: la app muestra "Actualizar". */
-const VERSION = 'est-2.3.0';
+const VERSION = 'est-2.3.1';
 const ARCHIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/config.js', 'css/tema.css', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
