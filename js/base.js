@@ -168,6 +168,8 @@
   }
   const rnd = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // Sube una foto. Si "conMini", sube además una miniatura (para el mapa y listas).
+  // Calidad de fotos según su uso: viene del núcleo (fotos.js); estos valores son el respaldo.
+  const FOTO = (k) => (g.CFX_FOTO && g.CFX_FOTO[k]) || { comprobante: { lado: 1000, calidad: 0.6, kb: 110 }, documento: { lado: 1400, calidad: 0.72, kb: 300 }, vitrina: { lado: 1080, calidad: 0.8, kb: 220 }, portada: { lado: 1280, calidad: 0.8, kb: 300 }, perfil: { lado: 400, calidad: 0.8, kb: 45 }, logo: { lado: 256, calidad: 0.85, kb: 30 } }[k];
   async function subirFoto(file, bucket, opt) {
     opt = opt || {};
     const uid = Api.uid();
@@ -374,7 +376,7 @@
   }
   g.U = {
     $, esc, clp, corto, hace, fecha, hora, fh, quedan, centrarSeg, ico, ponerIconos, sello, toast, modal, cerrarModal, confirmar, pedirTexto, amable,
-    subirFoto, urlFoto, urlMini, urlPrivada, imgMini, avatar, nombreCon, estrellas, rutValido, rutFormato, qrCanvas, mostrarQR,
+    subirFoto, FOTO, urlFoto, urlMini, urlPrivada, imgMini, avatar, nombreCon, estrellas, rutValido, rutFormato, qrCanvas, mostrarQR,
     enlace, compartir, aplicarColor, aplicarTema, oscuro, activarPush, pushActivo, pushOk, sincronizarPush
   };
   g.Api = Api;

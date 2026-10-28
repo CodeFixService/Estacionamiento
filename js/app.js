@@ -233,7 +233,7 @@
     if ($('rSubir')) $('rSubir').onclick = async (ev) => {
       const f = $('rComp').files[0]; if (!f) { toast('Elige la foto del comprobante'); return; }
       ev.target.disabled = true; ev.target.textContent = 'Subiendo…';
-      try { const ruta = await U.subirFoto(f, 'privado', { lado: 1280, calidad: 0.7 }); await Api.rpc('subir_comprobante', { p_id: id, p_ruta: ruta }); toast('¡Comprobante enviado! 🧾'); recargar(); }
+      try { const ruta = await U.subirFoto(f, 'privado', U.FOTO('comprobante')); await Api.rpc('subir_comprobante', { p_id: id, p_ruta: ruta }); toast('¡Comprobante enviado! 🧾'); recargar(); }
       catch (er) { ev.target.disabled = false; ev.target.textContent = '📤 Subir comprobante'; fallo(er); }
     };
     if ($('rAprobar')) $('rAprobar').onclick = () => hacer(() => Api.rpc('responder_arriendo', { p_id: id, p_aceptar: true, p_motivo: null }), 'Reserva confirmada ✅');
@@ -443,7 +443,7 @@
           const f = st.fotos[i];
           if (f.ruta) { rutas.push(f.ruta); continue; }
           b.textContent = 'Subiendo foto ' + (i + 1) + ' de ' + st.fotos.length + '…';
-          f.ruta = await U.subirFoto(f.file, 'fotos', { lado: 1280, calidad: 0.72, conMini: true });
+          f.ruta = await U.subirFoto(f.file, 'fotos', Object.assign({}, U.FOTO('vitrina'), { conMini: true }));
           rutas.push(f.ruta);
         }
         b.textContent = 'Guardando…';
@@ -779,7 +779,7 @@
       if (!/^[A-Z]?\d{9}$/.test(serie)) { toast('El número de documento debe tener 9 dígitos'); return; }
       const b = $('vEnv'); b.disabled = true;
       try {
-        const subir = async (k, campo, n) => { b.textContent = 'Subiendo foto ' + n + ' de 3…'; fotos[k] = await U.subirFoto($(campo).files[0], 'privado', { lado: 1600, calidad: 0.78 }); };
+        const subir = async (k, campo, n) => { b.textContent = 'Subiendo foto ' + n + ' de 3…'; fotos[k] = await U.subirFoto($(campo).files[0], 'privado', U.FOTO('documento')); };
         await subir('f', 'vF', 1); await subir('r', 'vR', 2); await subir('s', 'vS', 3);
         b.textContent = 'Enviando…';
         Api.guardar(await Api.rpc('enviar_verificacion', { p_rut: $('vRut').value, p_serie: serie, p_frente: fotos.f, p_reverso: fotos.r, p_selfie: fotos.s }));
@@ -853,7 +853,7 @@
       const f = $('prComp').files[0]; if (!f) { toast('Sube la foto del comprobante'); return; }
       e.target.disabled = true; e.target.textContent = 'Enviando…';
       try {
-        const ruta = await U.subirFoto(f, 'privado', { lado: 1280, calidad: 0.7 });
+        const ruta = await U.subirFoto(f, 'privado', U.FOTO('comprobante'));
         await Api.rpc('ya_pague', Object.assign({ p_nota: $('prNota').value, p_comprobante: ruta }, per === 'anual' ? { p_periodo: 'anual' } : {})); Api.empujar(); toast('¡Comprobante enviado! Te avisamos al aprobarlo');
       } catch (er) { toast(er.message); }
       e.target.disabled = false; e.target.textContent = '📤 Enviar comprobante';
