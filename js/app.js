@@ -571,6 +571,7 @@
     try { info = await Api.rpc('leer_mensajes', { p_conv: id, p_desde: 0 }); } catch (e) { V.innerHTML = volver() + '<div class="vacio">' + esc(e.message) + '</div>'; return; }
     const o = info.otro;
     V.innerHTML = '<div class="chat"><div class="chat-cab"><a class="icon-btn" href="#/chat" aria-label="Volver">' + ico('back') + '</a><a href="#/u/' + o.id + '" class="row grow" style="color:var(--ink)">' + avatar(o, 'xs') + '<b class="ell">' + nombreCon(o) + '</b></a>' +
+      '<button class="icon-btn" id="cBorrar" aria-label="Borrar conversación">' + ico('trash') + '</button>' +
       (o.admin ? '' : '<button class="icon-btn" id="cBlq" aria-label="Bloquear">' + ico('ban') + '</button><button class="icon-btn" id="cDen" aria-label="Denunciar">' + ico('flag') + '</button>') + '</div>' +
       '<div class="chat-msjs" id="cMsjs"><p class="small muted center">🔒 Nunca pagues antes de ver el estacionamiento. Si algo parece estafa, denúncialo con evidencia.<br>Máximo 3 mensajes seguidos: luego espera la respuesta.</p></div>' +
       '<div id="cAviso"></div><form class="chat-pie" id="cForm"><textarea id="cTxt" maxlength="500" rows="1" placeholder="Escribe un mensaje…"></textarea><button class="btn" aria-label="Enviar">' + ico('send') + '</button></form></div>';
@@ -606,6 +607,10 @@
         $('cTxt').value = ''; $('cTxt').style.height = '';
         Api.empujar(); await refrescar();
       } catch (er) { fallo(er); } finally { b.disabled = false; }
+    };
+    $('cBorrar').onclick = async () => {
+      if (!await confirmar('¿Borrar toda la conversación con ' + o.nombre + '? Se borra para los dos. Los mensajes también se borran solos a los 30 días.', 'Borrar', true)) return;
+      try { await Api.rpc('borrar_conversacion', { p_conv: id }); toast('Conversación borrada'); location.hash = '#/chat'; } catch (e) { fallo(e); }
     };
     if ($('cBlq')) {
       $('cBlq').onclick = async () => {
@@ -673,6 +678,8 @@
       '<div class="row between"><span>🌓 Apariencia</span><select id="cTema" style="width:auto"><option value="">Automática</option><option value="light">Clara</option><option value="dark">Oscura</option></select></div>' +
       '<div class="row between"><span>🔄 Versión ' + esc(cfg.VERSION) + '</span><button class="btn small sec" id="cAct">Buscar actualización</button></div>' +
       '<div class="row between" id="cInstWrap" hidden><span>' + ico('download') + ' Instalar la app</span><button class="btn small" id="cInst">Instalar</button></div></div>' +
+      '<div class="sec-tit">Respaldo</div><div class="card stack"><p class="small muted" style="margin:0">Descarga en Excel tus estacionamientos, arriendos y pagos. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
+      '<button class="btn sec small" id="cRespaldo">' + ico('download') + ' Descargar respaldo (Excel)</button></div>' +
       '<div class="sec-tit">Ayuda</div><div class="card stack"><a href="#/chat" id="cSop" class="row" style="color:var(--ink)">' + ico('help') + ' Soporte (chat)</a>' +
       '<a href="#/legal" class="row" style="color:var(--ink)">' + ico('shield') + ' Términos y privacidad</a>' +
       '<button class="row btn line" id="cSalir" style="justify-content:flex-start">' + ico('logout') + ' Cerrar sesión</button></div>' +
@@ -705,6 +712,7 @@
       $('cInstWrap').hidden = false; $('cInst').textContent = 'Cómo'; $('cInst').onclick = () => modal('<h2>Instalar en iPhone</h2><p>1. Abre esta página en <b>Safari</b>.<br>2. Toca <b>Compartir</b> (cuadrado con flecha).<br>3. Elige <b>Agregar a inicio</b>.</p>');
     }
     if (!a.admin) $('cSop').onclick = async (e) => { e.preventDefault(); try { location.hash = '#/chat/' + await Api.rpc('soporte'); } catch (er) { fallo(er); } };
+    $('cRespaldo').onclick = async () => { try { CFX_RESPALDO.excel('estaciona-' + (a.nombre || 'respaldo'), await Api.rpc('mi_respaldo')); toast('Respaldo descargado'); } catch (e) { fallo(e); } };
     $('cSalir').onclick = async () => { await Api.salir(); toast('Sesión cerrada'); location.hash = '#/'; };
     if ($('cBorrar')) $('cBorrar').onclick = async () => {
       if (!await confirmar('¿Eliminar tu cuenta? Se borran tu perfil, tus estacionamientos, fotos y mensajes. No se puede deshacer.', 'Eliminar para siempre', true)) return;
@@ -869,9 +877,18 @@
     V.innerHTML = '<h1>Avisos</h1><div id="avC"><div class="spin"></div></div>';
     try {
       const r = await Api.rpc('mis_notificaciones');
-      $('avC').innerHTML = r.length ? r.map((n) => '<a class="item" href="' + esc(n.url || '#/avisos') + '" style="' + (n.leida ? '' : 'border-color:var(--brand)') + '"><div class="grow"><b>' + esc(n.titulo) + '</b><div class="small">' + esc(n.cuerpo || '') + '</div><div class="small muted">' + hace(n.fecha) + '</div></div></a>').join('')
+      $('avC').innerHTML = r.length ? '<div class="row between" style="margin-bottom:8px"><span class="small muted">Se borran solos a los 30 días.</span><button class="btn sec small" id="avTodo">Borrar todos</button></div>' +
+        r.map((n) => '<a class="item" href="' + esc(n.url || '#/avisos') + '" style="' + (n.leida ? '' : 'border-color:var(--brand)') + '"><div class="grow"><b>' + esc(n.titulo) + '</b><div class="small">' + esc(n.cuerpo || '') + '</div><div class="small muted">' + hace(n.fecha) + '</div></div>' +
+          '<button class="icon-btn" data-quitar="' + n.id + '" aria-label="Borrar aviso">✕</button></a>').join('')
         : '<div class="vacio">' + ico('bell') + '<p>No tienes avisos.</p></div>';
       U.ponerIconos($('avC'));
+      $('avC').onclick = async (ev) => {
+        const b = ev.target.closest('[data-quitar]'), todo = ev.target.closest('#avTodo');
+        if (!b && !todo) return;
+        ev.preventDefault();
+        if (todo && !await confirmar('¿Borrar todos tus avisos?', 'Borrar', true)) return;
+        try { await Api.rpc('borrar_notificacion', { p_id: b ? +b.dataset.quitar : null }); if (b) b.closest('.item').remove(); else vAvisos(); contadores(); } catch (e) { fallo(e); }
+      };
       if (r.some((n) => !n.leida)) { await Api.rpc('marcar_leidas'); contadores(); }
     } catch (e) { $('avC').innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
   }
