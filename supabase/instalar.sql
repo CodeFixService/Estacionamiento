@@ -883,7 +883,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '8') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '9') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -2465,6 +2465,22 @@ begin
 end $$;
 drop trigger if exists cfx_cupon_usado on public.cfx_pagos;
 create trigger cfx_cupon_usado after update of estado on public.cfx_pagos for each row execute function public.cfx_cupon_usado();
+
+-- ---------- Verificación humana (Cloudflare Turnstile): la site key es pública; la secret key va en Supabase → Authentication → CAPTCHA ----------
+insert into public.cfx_config (clave, valor) values ('humano', '{"site_key": ""}') on conflict (clave) do nothing;
+create or replace function public.cfx_humano() returns jsonb
+language sql stable security definer set search_path = '' as $$ select valor from public.cfx_config where clave = 'humano' $$;
+create or replace function public.cfx_humano_guardar(p_site_key text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  if coalesce(p_site_key, '') <> '' and p_site_key !~ '^[0-9A-Za-z_-]{10,60}$' then raise exception 'Site key no válida'; end if;
+  update public.cfx_config set valor = jsonb_build_object('site_key', coalesce(p_site_key, '')) where clave = 'humano';
+  perform public.cfx_anotar('humano', case when coalesce(p_site_key, '') = '' then 'apagado' else 'site key ' || right(p_site_key, 4) end);
+end $$;
+revoke all on function public.cfx_humano(), public.cfx_humano_guardar(text) from public;
+grant execute on function public.cfx_humano() to anon, authenticated;
+grant execute on function public.cfx_humano_guardar(text) to authenticated;
 
 revoke all on function public.cfx_anotar(text, text), public.cfx_cupon_usado() from public, anon, authenticated;
 revoke all on function public.cfx_registro_lista(int), public.cfx_planes(), public.cfx_plan_guardar(text, text, jsonb, jsonb), public.cfx_textos(), public.cfx_texto_guardar(text, text),
