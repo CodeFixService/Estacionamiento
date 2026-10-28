@@ -470,7 +470,10 @@
   const SUBS = [['perfil', '👤 Perfil'], ['estacionamientos', '🅿️ Mis estacionamientos'], ['links', '💳 Links de pago'], ['favoritos', '❤️ Favoritos'],
     ['plan', '⭐ Plan'], ['estadisticas', '📊 Estadísticas'], ['cuenta', '⚙️ Mi cuenta']];
   async function vMas(sub) {
-    sub = sub || 'cuenta';
+    if (!sub) {  // Más: menú en cuadrícula; cada opción abre su sección (con la tira de secciones arriba)
+      V.innerHTML = '<h1>Más</h1><div class="cfx-grilla">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a href="#/mas/' + t[0] + '">' + t[1].replace(/^(\S+)\s/, '<span style="font-size:24px">$1</span>') + '</a>').join('') + '</div>';
+      return;
+    }
     if (sub === 'plan' && Api.admin()) sub = 'cuenta';
     V.innerHTML = '<div class="seg">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
     const T = $('masC');
