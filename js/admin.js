@@ -6,7 +6,7 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
-  const BD = 6; // versión de base de datos que espera esta app
+  const BD = 7; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   // Base de datos: se actualiza sola cada 10 minutos (desde GitHub). Aquí solo se ve su estado.

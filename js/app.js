@@ -358,6 +358,13 @@
         (a.verif_estado === 'pendiente' ? '' : '<a class="btn block" href="#/verificar">Verificar ahora</a>') + '</div>';
       return;
     }
+    // Núcleo (pagos.js): cuenta nueva que aún no hace su primer pago → lo pide antes de publicar el primero.
+    if (!id && !a.admin && !a.uso.publicados && window.CFX_PAGOS) {
+      const ex = await CFX_PAGOS.revisar({ rpc: (f, x) => Api.rpc(f, x), comoNegocio: true, salirTexto: 'Volver', salir: () => { location.hash = '#/'; } });
+      if (ex && ex.debe_inicio) { V.innerHTML = '<h1>Publicar estacionamiento</h1><div class="card center"><div style="font-size:48px">🚀</div><h2>Activa tu cuenta para publicar</h2>' +
+        '<p class="muted">Con tu primer pago publicas y tienes Premium por ' + ((ex.config.negocio || {}).inicio_dias || 30) + ' días.</p><button class="btn block" id="pubAct">Activar</button></div>';
+        $('pubAct').onclick = () => CFX_PAGOS.abrir({ rpc: (f, x) => Api.rpc(f, x), comoNegocio: true, salirTexto: 'Volver', salir: () => { location.hash = '#/'; } }); return; }
+    }
     let e = { fotos: [], vehiculo: 'auto' };
     if (id) {
       cargando();
@@ -801,12 +808,14 @@
     T = T || V;
     const aj = await Api.ajustes(true), a = Api.cuenta;
     const pl = aj.planes || {}, gr = (pl.gratis || {}).limites || {}, pr = (pl.premium || {}).limites || {};
-    const dur = (pl.premium || {}).duracion_dias || 30, an = aj.anual;
-    // Mensual o anual (el anual aparece solo si el admin le puso precio).
-    const ops = { mes: { precio: aj.precio || 0, link: aj.link_pago, texto: aj.texto_pago, dias: dur, nom: 'Mensual' } };
-    if (an) ops.anual = { precio: an.precio, link: an.link_pago, texto: an.texto_pago, dias: an.dias || 365, nom: 'Anual' };
+    // Precios: los mismos de las 6 apps (núcleo: cfx_precios; se editan en el Centro de Mando → Pagos).
+    // Quien publica paga como negocio; quien solo arrienda, como cliente.
+    const px = await Api.rpc('cfx_precios').catch(() => null) || {}, grupo = a && a.uso && a.uso.publicados > 0 ? 'negocio' : 'cliente';
+    const pz = px[grupo] || {}, an = pz.anual ? { precio: pz.anual } : null;
+    const ops = { mes: { precio: pz.mensual || 0, dias: 30, nom: 'Mensual' } };
+    if (an) ops.anual = { precio: an.precio, dias: 365, nom: 'Anual' };
     let per = 'mes';
-    const ahorro = an && aj.precio ? Math.round((1 - an.precio / (aj.precio * (ops.anual.dias / dur))) * 100) : 0;
+    const ahorro = an && pz.mensual ? Math.round((1 - an.precio / (pz.mensual * 12)) * 100) : 0;
     // Admin: vende, no compra. Premium vitalicio: nada que comprar. Premium pagado: la venta queda tras "Renovar"
     // (se muestra sola cuando faltan pocos días). Prueba y Gratis: ven los planes para comprar.
     const vitalicio = a && a.premium && /infinity/i.test(String(a.premium_hasta));
@@ -835,9 +844,7 @@
       '<table class="tabla card" style="margin-top:12px;padding:0"><tr><th></th><th>' + esc((pl.gratis || {}).nombre || 'Gratis') + '</th><th style="color:var(--gold)">' + esc((pl.premium || {}).nombre || 'Premium') + '</th></tr>' +
       filas.map((f) => '<tr><td>' + f[0] + '</td><td>' + v(gr[f[1]]) + '</td><td><b>' + v(pr[f[1]]) + '</b></td></tr>').join('') + '</table>' +
       '<div class="card" style="margin-top:12px"><b>Cómo activarlo</b><p class="small muted" style="margin:6px 0 10px">' + esc(Api.texto('pago_instrucciones', '')) + '</p>' +
-      '<button class="btn gold block" id="prComprar"></button>' +
-      '<label>Foto del comprobante</label><input type="file" id="prComp" accept="image/*"><input id="prNota" placeholder="Nota (opcional): nombre de quien pagó" maxlength="200" style="margin-top:8px">' +
-      '<button class="btn block" id="prPague" style="margin-top:10px">📤 Enviar comprobante</button></div>' +
+      '<button class="btn gold block" id="prComprar"></button><p class="small muted" style="margin:8px 0 0">Paga con link o transferencia y sube la foto del comprobante. Se activa apenas lo revisemos.</p></div>' +
       '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>' +
       (modo === 'activo' ? '</div>' : '');
     U.ponerIconos(T);
@@ -845,7 +852,7 @@
     const pintar = () => {
       const o = ops[per];
       $('prPrecio').textContent = clp(o.precio);
-      $('prDur').textContent = o.dias + ' días de Premium' + (o.texto ? ' · ' + o.texto : '');
+      $('prDur').textContent = o.dias + ' días de Premium';
       $('prComprar').textContent = '💳 Pagar ' + clp(o.precio) + (an ? ' (' + o.nom.toLowerCase() + ')' : '');
       if ($('prPer')) $('prPer').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.p === per));
     };
@@ -853,18 +860,7 @@
     if ($('prPer')) $('prPer').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { per = b.dataset.p; pintar(); } };
     $('prComprar').onclick = () => {
       if (!Api.logueado()) return pedirLogin('Crea tu cuenta para comprar Premium');
-      if (!ops[per].link) { toast('El link de pago estará disponible pronto. Escribe a soporte.'); return; }
-      window.open(ops[per].link, '_blank', 'noopener');
-    };
-    $('prPague').onclick = async (e) => {
-      if (!Api.logueado()) return pedirLogin();
-      const f = $('prComp').files[0]; if (!f) { toast('Sube la foto del comprobante'); return; }
-      e.target.disabled = true; e.target.textContent = 'Enviando…';
-      try {
-        const ruta = await U.subirFoto(f, 'privado', U.FOTO('comprobante'));
-        await Api.rpc('ya_pague', Object.assign({ p_nota: $('prNota').value, p_comprobante: ruta }, per === 'anual' ? { p_periodo: 'anual' } : {})); Api.empujar(); toast('¡Comprobante enviado! Te avisamos al aprobarlo');
-      } catch (er) { toast(er.message); }
-      e.target.disabled = false; e.target.textContent = '📤 Enviar comprobante';
+      CFX_PAGOS.abrir({ rpc: (f, x) => Api.rpc(f, x), alPagar: () => Api.empujar() });
     };
     $('prCanje').onclick = async () => {
       if (!Api.logueado()) return pedirLogin();
