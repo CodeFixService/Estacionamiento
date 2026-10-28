@@ -883,7 +883,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '4') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '5') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1845,7 +1845,7 @@ grant execute on function public.srv_huerfanos(), public.limpieza(), public.libe
 -- =====================================================================
 -- Actualización automática (núcleo CodeFix): cada 10 minutos la base revisa GitHub (rama main).
 --   · Si hay una base nueva (version.json), descarga y ejecuta este mismo instalar.sql (no borra datos).
---   · Si solo cambió la app, la libera para que los celulares se actualicen solos.
+--   · La app la liberas tú cuando la pruebes (panel de la app o Centro de Mando → Liberar).
 --   Si algo falla no cambia nada y lo reintenta en la siguiente vuelta. Hay que correr este archivo UNA vez.
 -- =====================================================================
 create or replace function public.auto_actualizar() returns text
@@ -1863,14 +1863,7 @@ begin
     execute codigo;
     return 'base actualizada a ' || ((select valor #>> '{}' from public.config where clave = 'version_bd'))::text;
   end if;
-  -- Solo cambió la app (la base ya está al día): se libera para que los celulares se actualicen solos.
-  if v_app ~ re and v_bd = ((select valor #>> '{}' from public.config where clave = 'version_bd'))::text then
-    lib := (select valor from public.textos where clave = 'version_liberada');
-    if lib is null or lib !~ re or string_to_array(v_app, '.')::int[] > string_to_array(lib, '.')::int[] then
-      insert into public.textos (clave, valor) values ('version_liberada', v_app) on conflict (clave) do update set valor = excluded.valor;
-      return 'app liberada ' || v_app;
-    end if;
-  end if;
+  -- La app NO se libera sola: la liberas tú desde el panel o el Centro de Mando después de probarla.
   return 'al día';
 exception when others then
   return 'sin cambios: ' || sqlerrm;

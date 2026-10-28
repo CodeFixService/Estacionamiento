@@ -6,28 +6,17 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
-  const BD = 4; // versión de base de datos que espera esta app
+  const BD = 5; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
-  // Base de datos: comando para copiar y botón que abre el editor SQL de Supabase con el comando ya pegado.
-  const SQL_BD = "create extension if not exists http with schema extensions;\ndo $$ begin\n  execute (select content from extensions.http_get('https://raw.githubusercontent.com/CodeFixService/Estacionamiento/main/supabase/instalar.sql'));\nend $$;";
-  const urlSQL = () => 'https://supabase.com/dashboard/project/' + new URL(g.EST_CONFIG.SUPABASE_URL).hostname.split('.')[0] + '/sql/new?content=' + encodeURIComponent(SQL_BD);
+  // Base de datos: se actualiza sola cada 10 minutos (desde GitHub). Aquí solo se ve su estado.
   function cardBD(inst) {
     const al = inst === String(BD);
     return '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><table class="tabla"><tr><td>Instalada</td><td><b>' + esc(inst) + '</b></td></tr>' +
       '<tr><td>La que espera la app</td><td>' + BD + '</td></tr></table>' +
-      '<p class="small">' + (al ? '✅ Al día. Se puede volver a ejecutar cuando quieras: no borra datos.' : '⚠️ Hay que actualizarla: toca <b>Abrir Supabase</b> y luego <b>Run</b>.') + '</p>' +
-      '<pre class="small" style="white-space:pre-wrap;word-break:break-all;background:var(--card2);padding:10px;border-radius:10px;user-select:all;margin:0">' + esc(SQL_BD) + '</pre>' +
-      '<div class="row" style="margin-top:10px"><button class="btn sec small grow" id="bdCop">📋 Copiar comando</button><button class="btn small grow' + (al ? ' sec' : '') + '" id="bdAbrir">↗️ Abrir Supabase</button></div>' +
-      '<p class="small muted">"Abrir Supabase" abre el editor SQL de tu proyecto con el comando ya pegado (y además lo copia): solo toca <b>Run</b>.</p></div>';
+      '<p class="small">' + (al ? '✅ Al día. Se actualiza sola cuando hay una versión nueva.' : '⏳ Se está actualizando sola (máximo 10 minutos, no borra datos).') + '</p></div>';
   }
-  async function copiarSQL() { try { await navigator.clipboard.writeText(SQL_BD); return true; } catch (e) { return false; } }
-  async function accionBD(t) {
-    t = t.closest('button') || t;
-    if (t.id === 'bdCop') { toast(await copiarSQL() ? 'Comando copiado' : 'Mantén presionado el comando para copiarlo'); return true; }
-    if (t.id === 'bdAbrir') { const w = window.open(urlSQL(), '_blank'); await copiarSQL(); if (!w) location.href = urlSQL(); return true; }
-    return false;
-  }
+  async function accionBD() { return false; }
 
   function marco(tab, pend) {
     V.innerHTML = '<div class="row between"><h1>Administración</h1><span class="chip-admin">ADMIN</span></div><div class="tabs">' +
@@ -339,14 +328,14 @@
         const lib = a.textos.version_liberada || '—', cfg = g.EST_CONFIG;
         $('mVer').innerHTML = '<h3 style="margin-top:0">🔄 Versiones de la app</h3><table class="tabla"><tr><td>Publicada (GitHub)</td><td><b>' + esc(pub) + '</b></td></tr>' +
           '<tr><td>La que usas tú</td><td>' + esc(cfg.VERSION) + '</td></tr><tr><td>Liberada a todos</td><td>' + esc(lib) + '</td></tr></table>' +
-          '<p class="small muted">1) Actualiza tú y prueba. 2) Toca <b>Liberar</b>: a todos les aparece "Hay una versión nueva → Actualizar ahora" y les llega un aviso push.</p>' +
+          '<p class="small muted">1) Actualiza la tuya y prueba. 2) Toca <b>Liberar</b>: a todos se les actualiza sola y les llega un aviso.</p>' +
           '<div class="row wrap"><button class="btn sec small" id="vMia">Actualizar la mía</button><button class="btn small" id="vLib"' + (pub === '?' || pub === lib ? ' disabled' : '') + '>🚀 Liberar v' + esc(pub) + ' a todos</button></div>';
         $('vMia').onclick = (e) => g.App.actualizarAhora(e.target);
         $('vLib').onclick = async () => {
           if (!await confirmar('¿Liberar la versión ' + pub + ' a todos y avisarles?', 'Liberar')) return;
           try {
             await Api.rpc('admin_guardar_textos', { p: { version_liberada: pub } });
-            const n = await Api.rpc('admin_aviso', { p_titulo: '🔄 Nueva versión ' + pub, p_cuerpo: 'Abre Estaciona y toca "Actualizar ahora".' });
+            const n = await Api.rpc('admin_aviso', { p_titulo: '🔄 Nueva versión ' + pub, p_cuerpo: 'Abre Estaciona: se actualiza sola.' });
             for (let i = 0; i < Math.ceil(n / 300); i++) await Api.funcion('push').catch(() => {});
             toast('Versión ' + pub + ' liberada · aviso a ' + n + ' usuarios'); ir('mant');
           } catch (er) { toast(er.message); }
