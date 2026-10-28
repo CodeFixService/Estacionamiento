@@ -883,7 +883,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '9') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '10') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -2104,7 +2104,9 @@ begin
   pagado := exists (select 1 from public.cfx_pagos where cuenta = (y ->> 'id')::uuid and estado = 'aprobado')
     or exists (select 1 from public.cfx_exentos where cuenta = (y ->> 'id')::uuid);
   -- debe_inicio: cuenta nueva (desde que activaste la regla) sin primer pago. bloqueado: además es un negocio.
+  -- Solo si ya hay una forma de pago configurada (si no, nadie podría pagar).
   debe := coalesce((c #>> '{negocio,exigir_inicio}')::boolean, false) and not pagado
+     and (coalesce(c ->> 'link', '') <> '' or coalesce(c #>> '{transferencia,numero}', '') <> '')
      and (y ->> 'creado')::timestamptz > coalesce((c ->> 'inicio_desde')::timestamptz, now());
   bloq := debe and y ->> 'rol' = 'negocio';
   return jsonb_build_object('config', c - 'inicio_desde', 'yo', y, 'pagado', pagado, 'bloqueado', bloq, 'debe_inicio', debe,
@@ -2158,7 +2160,10 @@ begin
   if coalesce(p ->> 'link', '') <> '' and (p ->> 'link') !~ '^https://[^ ]+$' then raise exception 'El link de pago debe empezar con https://'; end if;
   if coalesce((p ->> 'comision_pct')::numeric, 0) not between 0 and 20 then raise exception 'La comisión va de 0 a 20 %%'; end if;
   -- Al activar "bloquear hasta el primer pago", solo aplica a los negocios que se registren desde ahora.
-  if coalesce((p #>> '{negocio,exigir_inicio}')::boolean, false) and not coalesce((v #>> '{negocio,exigir_inicio}')::boolean, false) then
+  -- También cuando se configura la primera forma de pago (antes nadie podía pagar, así que nadie quedó obligado).
+  if coalesce((p #>> '{negocio,exigir_inicio}')::boolean, false) and (not coalesce((v #>> '{negocio,exigir_inicio}')::boolean, false)
+     or (coalesce(v ->> 'link', '') = '' and coalesce(v #>> '{transferencia,numero}', '') = ''
+         and (coalesce(p ->> 'link', '') <> '' or coalesce(p #>> '{transferencia,numero}', '') <> ''))) then
     p := p || jsonb_build_object('inicio_desde', now());
   end if;
   v := v || (p - 'inicio_desde') || case when p ? 'inicio_desde' then jsonb_build_object('inicio_desde', p -> 'inicio_desde') else '{}'::jsonb end;
