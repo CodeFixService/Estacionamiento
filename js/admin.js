@@ -284,11 +284,7 @@
           '<label>Link de pago</label><input class="alU" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
           '<label>Texto (opcional)</label><input class="alT" maxlength="300" placeholder="Ej: Oferta de lanzamiento" value="' + esc(s.texto) + '">' +
           '<button class="btn block alOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
-        html = '<p class="small muted">Links de pago del Premium (te pagan a ti). Cada plan tiene 2 espacios: el <b>activo</b> define el precio que ve todo el mundo.</p>' +
-          '<div class="sec-tit">📅 Premium mensual · ' + ((a.planes || []).find((p) => p.codigo === 'premium') || {}).duracion_dias + ' días</div>' + espacios(a.links, 'premium') +
-          '<div class="sec-tit">🗓️ Premium anual · ' + (a.reglas.dias_anual ?? 365) + ' días</div>' +
-          (a.links_anual ? '<p class="small muted">Con precio 0 en el espacio activo, el plan anual no se muestra. Los días se cambian en <b>Reglas</b>.</p>' + espacios(a.links_anual, 'premium_anual')
-            : '<div class="aviso warn">Actualiza la base de datos (Mantención) para activar el plan anual.</div>');
+        html = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>';  // centralizado en el Centro de Mando
       } else if (sub === 'planes') {
         const etq = { publicar: 'Estacionamientos publicados', arrendar: 'Arriendos activos a la vez', fotos: 'Fotos por estacionamiento', favoritos: 'Favoritos (500 = ilimitado)',
           destacado: 'Pin dorado destacado', estadisticas: 'Estadísticas', alertas: 'Alerta de zona', color_libre: 'Color libre (RGB)', qr_color: 'QR con su color' };
