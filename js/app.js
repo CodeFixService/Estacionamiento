@@ -983,6 +983,8 @@
     const lib = ((await Api.ajustes(true)).textos || {}).version_liberada || '';
     const nueva = v && mayor(v, cfg.VERSION) && (Api.admin() || (lib && !mayor(v, lib)));
     if (!nueva) { if (manual) toast('Ya tienes la última versión (v' + cfg.VERSION + ') ✅'); return; }
+    // Núcleo: si ya está liberada, se instala sola (sin botón). El admin ve el aviso solo mientras no la libera.
+    if (lib && !mayor(v, lib) && !manual && g.CodeFixAuto) { g.CodeFixAuto(v, () => actualizarAhora()); return; }
     if (document.getElementById('upd')) return;
     const d = document.createElement('div'); d.id = 'upd'; d.className = 'actualizar';
     d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><small>Tienes la v' + esc(cfg.VERSION) + ' · nueva v' + esc(v) + (Api.admin() && lib !== v ? ' (solo tú: pruébala y libérala en Admin → Ajustes → Mantención)' : '') + '</small></div><button class="btn small">Actualizar ahora</button>';
