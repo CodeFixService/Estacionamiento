@@ -304,8 +304,13 @@
       cuenta = c || null;
       try { if (c) localStorage.setItem('est:cuenta', JSON.stringify(c)); else localStorage.removeItem('est:cuenta'); } catch (e) { /* nada */ }
       if (c) aplicarColor(c.color);
-      // Núcleo (premium.js): con Premium la app se ve dorada y la primera vez saluda.
-      if (c && !c.admin) (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && (window.CFX_AYUDA_PEND = { rpc: rpc, app: 'estaciona' }, window.CFX_AYUDA && CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND), true) && CFX_PREMIUM.marcar({ premium: !!c.premium && c.plan_origen !== 'prueba', id: c.id, hasta: c.premium_hasta }));
+      // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
+      if (c) {
+        window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'estaciona', admin: !!c.admin, premium: !!c.premium && c.plan_origen !== 'prueba', id: c.id, hasta: c.premium_hasta,
+          nombre: c.nombre, email: c.email, foto: c.avatar ? urlFoto(c.avatar) : null, quitar: '#btnAdmin, #miniAv', cuenta: '#/mas/cuenta', panel: c.admin ? '#/admin' : null,
+          salir: async () => { await Api.salir(); location.hash = '#/'; location.reload(); } });
+        if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
+      }
       document.dispatchEvent(new CustomEvent('cuenta'));
     },
     async ingresar(email, clave) {

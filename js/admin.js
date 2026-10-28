@@ -1,11 +1,12 @@
-/* Estaciona · panel del súper administrador. */
+/* Estaciona · panel del súper administrador: verificaciones, denuncias, usuarios, estacionamientos y ajustes propios.
+   Precios, planes, textos, keys, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando. */
 (function (g) {
   'use strict';
   const U = g.U, Api = g.Api;
   const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, imgMini, hace, fecha } = U;
   const V = $('vista');
-  const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['pagos', 'Pagos'], ['usuarios', 'Usuarios'],
-    ['estacionamientos', 'Estacionamientos'], ['keys', 'Keys'], ['avisos', 'Avisos'], ['ajustes', 'Ajustes']];
+  const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['usuarios', 'Usuarios'],
+    ['estacionamientos', 'Estacionamientos'], ['ajustes', 'Ajustes']];
   const BD = 11; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
@@ -19,7 +20,7 @@
   async function accionBD() { return false; }
 
   function marco(tab, pend) {
-    V.innerHTML = '<div class="row between"><h1>Administración</h1><span class="chip-admin">ADMIN</span></div><div class="tabs">' +
+    V.innerHTML = '<h1>Administración</h1><div class="tabs">' +
       TABS.map((t) => '<a href="#/admin/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + (pend && pend[t[0]] ? ' <span class="pill bad" style="padding:0 6px">' + pend[t[0]] + '</span>' : '') + '</a>').join('') +
       '</div><div id="adC"><div class="spin"></div></div>';
     return $('adC');
@@ -37,15 +38,15 @@
   const VISTAS = {
     async resumen(C) {
       const r = await Api.rpc('admin_resumen');
-      pendientes = { verificaciones: r.pend_verif, denuncias: r.pend_denuncias, pagos: r.pend_pagos };
+      pendientes = { verificaciones: r.pend_verif, denuncias: r.pend_denuncias };
       marco('resumen', pendientes); C = $('adC');
       const s = r.servidor, pDb = s.db / s.db_lim * 100, pSt = (s.fotos + s.privado) / s.st_lim * 100;
       const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
       const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
       C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
-        ((r.pend_verif || r.pend_denuncias || r.pend_pagos) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
-        r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>', r.pend_pagos && '<a href="#/admin/pagos">💳 ' + r.pend_pagos + ' aviso(s) de pago</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
+        ((r.pend_verif || r.pend_denuncias) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
+        r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
         ((r.devoluciones || []).length ? '<div class="sec-tit">💸 Devoluciones atrasadas</div><div class="card stack">' + r.devoluciones.map((d) =>
           '<div class="row between"><div class="grow small"><b>' + esc(d.dueno.nombre) + '</b> debe ' + clp(d.monto) + ' a ' + esc(d.arrendatario.nombre) +
           '<div class="muted">"' + esc(d.titulo) + '" · desde ' + fecha(d.desde) + '</div></div><button class="btn sec small" data-dev="' + d.dueno.id + '">' + ico('chat') + ' Escribir</button></div>').join('') + '</div>' : '') +
@@ -135,28 +136,6 @@
       };
     },
 
-    async pagos(C, estado) {
-      estado = estado || 'pendiente';
-      const r = await Api.rpc('admin_pagos', { p_estado: estado });
-      C.innerHTML = '<div class="seg">' + [['pendiente', '🧾 Por revisar'], ['aprobado', '✅ Aprobados'], ['rechazado', '❌ Rechazados']].map((t) => '<button data-e="' + t[0] + '" class="' + (t[0] === estado ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>' +
-        (r.length ? r.map((p) => '<div class="card" style="margin-top:10px" data-id="' + p.id + '"><div class="row">' + avatar(p.usuario) + '<div class="grow"><b>' + esc(p.usuario.nombre) + '</b><div class="small muted">' + esc(p.email) + ' · ' + hace(p.creado) + '</div></div><div style="text-align:right"><b>' + clp(p.monto) + '</b><div>' + (p.periodo === 'anual' ? '<span class="pill gold">🗓️ Anual</span>' : '<span class="pill">📅 Mensual</span>') + '</div></div></div>' +
-          (p.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px">' + esc(p.nota) + '</p>' : '') +
-          (p.comprobante ? '<img class="ver-img" data-priv="' + esc(p.comprobante) + '" alt="Comprobante" style="margin-top:8px"><a class="btn sec small" style="margin-top:6px" data-desc="' + esc(p.comprobante) + '">' + ico('download') + ' Descargar</a>' : '<p class="small muted">Sin comprobante (o ya se borró)</p>') +
-          (p.motivo ? '<p class="small"><b>Motivo:</b> ' + esc(p.motivo) + '</p>' : '') +
-          (estado === 'pendiente' ? '<div class="row" style="margin-top:10px"><button class="btn ok grow" data-ap="1">✅ Aprobar Premium</button><button class="btn line grow" data-ap="0">Rechazar</button></div>' : '') + '</div>').join('')
-          : '<div class="vacio">💳<p>No hay pagos aquí</p></div>');
-      C.querySelectorAll('[data-priv]').forEach(async (img) => { img.src = await U.urlPrivada(img.dataset.priv); img.onclick = () => window.open(img.src, '_blank'); });
-      C.onclick = async (e) => {
-        const t = e.target.closest('[data-e]'); if (t) { VISTAS.pagos(C, t.dataset.e).then(() => U.ponerIconos(C)); return; }
-        const d = e.target.closest('[data-desc]');
-        if (d) { const u = await U.urlPrivada(d.dataset.desc); const a = document.createElement('a'); a.href = u; a.download = 'comprobante'; a.target = '_blank'; a.click(); return; }
-        const b = e.target.closest('[data-ap]'); if (!b) return;
-        let motivo = null;
-        if (b.dataset.ap === '0') { motivo = await U.pedirTexto('Motivo del rechazo', 'Ej: no encontré el pago en mi cuenta', 'Rechazar'); if (motivo == null) return; }
-        try { await Api.rpc('admin_resolver_pago', { p_id: b.closest('[data-id]').dataset.id, p_aprobar: b.dataset.ap === '1', p_motivo: motivo }); Api.empujar(); toast('Listo'); vista('pagos'); } catch (er) { toast(er.message); }
-      };
-    },
-
     async usuarios(C) {
       C.innerHTML = '<div class="row"><input id="uQ" placeholder="Buscar por nombre, correo o RUT" class="grow"><select id="uF" style="width:auto"><option value="">Todos</option><option value="premium">Premium</option><option value="gratis">Gratis</option><option value="por_vencer">Por vencer (7 días)</option><option value="inactivos">Inactivos (30 días)</option>' +
         '<option value="verificados">Verificados</option><option value="sin_verificar">Sin verificar</option><option value="suspendidos">Suspendidos</option></select></div><div id="uL"><div class="spin"></div></div><button class="btn line block" id="uMas" hidden style="margin-top:10px">Ver más</button>';
@@ -233,70 +212,19 @@
       await cargar(false);
     },
 
-    async keys(C) {
-      const r = await Api.rpc('admin_keys');
-      C.innerHTML = '<div class="card"><h3>Crear keys Premium</h3><div class="grid3"><div><label>Duración</label><select id="kM"><option value="1">1 mes</option><option value="3">3 meses</option><option value="6">6 meses</option><option value="12">12 meses</option><option value="0">De por vida</option></select></div>' +
-        '<div><label>Cantidad</label><input id="kN" type="number" min="1" max="50" value="1"></div><div><label>Nota</label><input id="kNota" placeholder="Ej: Juan"></div></div>' +
-        '<button class="btn block" id="kCrear" style="margin-top:12px">' + ico('key') + ' Crear</button><div id="kNuevas"></div></div>' +
-        '<div class="sec-tit">Keys creadas</div>' + (r.length ? '<div class="card pad0"><table class="tabla"><tr><th style="padding-left:12px">Key</th><th>Plan</th><th>Estado</th><th></th></tr>' +
-          r.map((k) => '<tr><td style="padding-left:12px"><code class="key">' + esc(k.key) + '</code>' + (k.nota ? '<div class="small muted">' + esc(k.nota) + '</div>' : '') + '</td><td>' + (k.meses ? k.meses + ' m' : '∞') + '</td>' +
-            '<td class="small">' + (k.revocada ? '<span class="pill bad">Anulada</span>' : k.canjeada ? '<span class="pill ok">Usada</span><div class="muted">' + esc(k.usuario || '') + '</div>' : '<span class="pill">Libre</span>') + '</td>' +
-            '<td>' + (!k.canjeada && !k.revocada ? '<button class="btn sec small" data-wa="' + esc(k.key) + '">WhatsApp</button> <button class="btn line small" data-rev="' + esc(k.key) + '">Anular</button>' : '') + '</td></tr>').join('') + '</table></div>' : '<div class="vacio">Aún no creas keys</div>');
-      const msj = (k) => '⭐ ¡Tu Premium de Estaciona está listo!\n\nKey: *' + k + '*\n\n1. Abre ' + U.enlace('#/premium') + '\n2. Pega la key en "¿Tienes una key?" y toca Activar.';
-      $('kCrear').onclick = async () => {
-        try {
-          const ks = await Api.rpc('admin_crear_keys', { p_meses: +$('kM').value, p_cantidad: +$('kN').value || 1, p_nota: $('kNota').value });
-          vista('keys').then(() => {
-            $('kNuevas').innerHTML = '<div class="aviso" style="margin-top:12px"><b>Nuevas:</b><br>' + ks.map((k) => '<div class="row between" style="margin-top:6px"><code class="key">' + esc(k) + '</code><button class="btn sec small" data-wa="' + esc(k) + '">WhatsApp</button></div>').join('') + '</div>';
-          });
-        } catch (e) { toast(e.message); }
-      };
-      C.onclick = async (e) => {
-        const wa = e.target.closest('[data-wa]');
-        if (wa) { window.open('https://wa.me/?text=' + encodeURIComponent(msj(wa.dataset.wa)), '_blank'); return; }
-        const rv = e.target.closest('[data-rev]');
-        if (rv && await confirmar('¿Anular la key ' + rv.dataset.rev + '?', 'Anular', true)) { try { await Api.rpc('admin_revocar_key', { p_key: rv.dataset.rev }); vista('keys'); } catch (er) { toast(er.message); } }
-      };
-    },
-
-    async avisos(C) {
-      C.innerHTML = '<div class="card"><h3>Aviso a todos los usuarios</h3><p class="small muted">Llega a la campana de avisos y como notificación push a quienes la tengan activa.</p>' +
-        '<label>Título</label><input id="avT" maxlength="80" placeholder="Ej: ¡Nuevos estacionamientos en Ñuñoa!"><label>Mensaje</label><textarea id="avC" maxlength="200"></textarea>' +
-        '<button class="btn block" id="avOk" style="margin-top:12px">' + ico('send') + ' Enviar a todos</button></div>';
-      $('avOk').onclick = async (e) => {
-        if (!await confirmar('¿Enviar este aviso a todos los usuarios?', 'Enviar')) return;
-        e.target.disabled = true;
-        try { const n = await Api.rpc('admin_aviso', { p_titulo: $('avT').value, p_cuerpo: $('avC').value }); for (let i = 0; i < Math.ceil(n / 300); i++) await Api.funcion('push').catch(() => {}); toast('Enviado a ' + n + ' usuarios'); $('avT').value = $('avC').value = ''; }
-        catch (er) { toast(er.message); } finally { e.target.disabled = false; }
-      };
-    },
-
-    async ajustes(C, sub) {
-      sub = sub || 'precios';
+    // Ajustes en cuadrícula (núcleo): solo lo propio de Estaciona.
+    async ajustes(C) {
       const a = await Api.rpc('admin_config');
-      const SUBS = [['precios', '💳 Precios y links'], ['planes', '⭐ Planes'], ['reglas', '⏱️ Reglas'], ['textos', '📝 Textos'], ['push', '🔔 Notificaciones'], ['mant', '🧹 Mantención']];
-      const nav = '<div class="seg">' + SUBS.map((t) => '<button data-s="' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>';
-      const ir = (s) => VISTAS.ajustes(C, s).then(() => { U.ponerIconos(C); U.centrarSeg(C); });
+      window.CFX_AJUSTES.montar(C, [
+        { k: 'reglas', ico: '⏱️', t: 'Reglas', d: 'Pagos, devoluciones y mensajes', abrir: (z) => VISTAS.seccion(z, 'reglas', a) },
+        { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y función "enviar"', abrir: (z) => VISTAS.seccion(z, 'push', a) },
+        { k: 'mant', ico: '🧹', t: 'Mantención', d: 'Limpieza y base de datos', abrir: (z) => VISTAS.seccion(z, 'mant', a) }
+      ], { arriba: '<p class="small muted" style="margin:0 0 10px">Precios, planes, textos, keys, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
+    },
+    async seccion(C, sub, a) {
+      const ir = (x) => VISTAS.seccion(C, x, a).then(() => U.ponerIconos(C));
       let html = '';
-      if (sub === 'precios') {
-        const espacios = (lista, tipo) => (lista || []).map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '" data-tipo="' + tipo + '"><div class="row between"><b>Espacio ' + s.slot + '</b><label class="check" style="margin:0"><input type="radio" name="alAct-' + tipo + '"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
-          '<label>Precio (CLP)</label><input class="alM" type="number" inputmode="numeric" min="0" value="' + s.monto + '">' +
-          '<label>Link de pago</label><input class="alU" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
-          '<label>Texto (opcional)</label><input class="alT" maxlength="300" placeholder="Ej: Oferta de lanzamiento" value="' + esc(s.texto) + '">' +
-          '<button class="btn block alOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
-        html = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>';  // centralizado en el Centro de Mando
-      } else if (sub === 'planes') {
-        const etq = { publicar: 'Estacionamientos publicados', arrendar: 'Arriendos activos a la vez', fotos: 'Fotos por estacionamiento', favoritos: 'Favoritos (500 = ilimitado)',
-          destacado: 'Pin dorado destacado', estadisticas: 'Estadísticas', alertas: 'Alerta de zona', color_libre: 'Color libre (RGB)', qr_color: 'QR con su color' };
-        html = a.planes.map((p) => '<div class="card" data-plan="' + p.codigo + '"><h3 style="margin-top:0">' + (p.codigo === 'premium' ? '⭐ ' : '') + esc(p.nombre) + '</h3>' +
-          '<div class="grid2"><div><label>Nombre</label><input class="plN" value="' + esc(p.nombre) + '"></div><div><label>Duración (días)</label><input class="plD" type="number" min="1" value="' + p.duracion_dias + '"></div></div>' +
-          '<label>Descripción</label><input class="plDe" value="' + esc(p.descripcion) + '">' +
-          '<div class="grid2">' + Object.keys(etq).map((k) => typeof p.limites[k] === 'boolean'
-            ? '<label class="check"><input type="checkbox" data-k="' + k + '"' + (p.limites[k] ? ' checked' : '') + '> ' + etq[k] + '</label>'
-            : '<div><label>' + etq[k] + '</label><input type="number" min="0" data-k="' + k + '" value="' + (p.limites[k] || 0) + '"></div>').join('') + '</div>' +
-          '<label>Beneficios (uno por línea)</label><textarea class="plB">' + esc((p.beneficios || []).join('\n')) + '</textarea>' +
-          '<button class="btn block plOk" style="margin-top:10px">Guardar plan</button></div>').join('');
-      } else if (sub === 'reglas') {
+      if (sub === 'reglas') {
         const etq = { minutos_pago: 'Minutos para pagar y subir el comprobante (reserva retenida)', minutos_devolucion: 'Minutos para cancelar con devolución',
           horas_cancelacion: 'Horas de anticipación para saldo a favor', dias_saldo: 'Días que dura el saldo a favor', dias_regalo: 'Días de Premium de regalo al crear una cuenta',
           dias_aviso_vencimiento: 'Días de aviso antes de que venza el Premium', dias_comprobantes: 'Días antes de borrar los comprobantes', dias_mensajes: 'Días antes de borrar los mensajes',
@@ -304,68 +232,18 @@
           dias_devolucion: 'Días que tiene el dueño para devolver un pago (luego te avisa)', dias_anual: 'Días de Premium que entrega el pago anual' };
         html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><input type="number" min="0" data-r="' + k + '" value="' + (a.reglas[k] ?? '') + '">').join('') +
           '<button class="btn block" id="rgOk" style="margin-top:12px">Guardar reglas</button></div>';
-      } else if (sub === 'textos') {
-        const etq = { app_lema: 'Lema de la app', reserva_pago: 'Instrucciones de pago de la reserva ({minutos})', reserva_politica: 'Política de cancelación ({devolucion} {horas} {dias})',
-          premium_titulo: 'Título de Premium', premium_texto: 'Texto de Premium', pago_instrucciones: 'Instrucciones para pagar Premium', bienvenida: 'Bienvenida', aviso_seguridad: 'Aviso de seguridad' };
-        html = '<div class="card">' + Object.keys(etq).map((k) => '<label>' + etq[k] + '</label><textarea data-t="' + k + '">' + esc(a.textos[k] || '') + '</textarea>').join('') +
-          '<button class="btn block" id="txOk" style="margin-top:12px">Guardar textos</button></div>';
       } else if (sub === 'push') {
         html = '<div class="card"><h3 style="margin-top:0">🔔 Notificaciones push</h3><p class="small muted">' + (a.vapid_public && a.push ? '✅ Claves configuradas.' : 'Genera las claves una sola vez para enviar notificaciones al celular.') + '</p>' +
           '<div class="row wrap"><button class="btn sec small" id="ajVapid">' + (a.vapid_public ? 'Regenerar claves' : 'Generar claves push') + '</button><button class="btn sec small" id="ajPing">Probar función "enviar"</button><button class="btn sec small" id="ajYo">Prueba: aviso solo a mí</button></div></div>';
       } else {
-        html = '<div class="card"><h3 style="margin-top:0">🧹 Mantención</h3><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">Limpiar ahora</button></div>' +
-          '<div class="card" id="mVer"><h3 style="margin-top:0">🔄 Versiones de la app</h3><p class="small">Cargando…</p></div>' +
+        html = '<div class="card"><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">🧹 Limpiar ahora</button></div>' +
           cardBD(String((await Api.ajustes(true)).version_bd || '?'));
       }
-      C.innerHTML = nav + html;
-      if ($('mVer')) {
-        let pub = '?';
-        try { pub = String((await (await fetch('version.json?t=' + Date.now(), { cache: 'no-store' })).json()).version); } catch (e) { /* sin red */ }
-        const lib = a.textos.version_liberada || '—', cfg = g.EST_CONFIG;
-        $('mVer').innerHTML = '<h3 style="margin-top:0">🔄 Versiones de la app</h3><table class="tabla"><tr><td>Publicada (GitHub)</td><td><b>' + esc(pub) + '</b></td></tr>' +
-          '<tr><td>La que usas tú</td><td>' + esc(cfg.VERSION) + '</td></tr><tr><td>Liberada a todos</td><td>' + esc(lib) + '</td></tr></table>' +
-          '<p class="small muted">1) Actualiza la tuya y prueba. 2) Toca <b>Liberar</b>: a todos se les actualiza sola y les llega un aviso.</p>' +
-          '<div class="row wrap"><button class="btn sec small" id="vMia">Actualizar la mía</button><button class="btn small" id="vLib"' + (pub === '?' || pub === lib ? ' disabled' : '') + '>🚀 Liberar v' + esc(pub) + ' a todos</button></div>';
-        $('vMia').onclick = (e) => g.App.actualizarAhora(e.target);
-        $('vLib').onclick = async () => {
-          if (!await confirmar('¿Liberar la versión ' + pub + ' a todos y avisarles?', 'Liberar')) return;
-          try {
-            await Api.rpc('admin_guardar_textos', { p: { version_liberada: pub } });
-            const n = await Api.rpc('admin_aviso', { p_titulo: '🔄 Nueva versión ' + pub, p_cuerpo: 'Abre Estaciona: se actualiza sola.' });
-            for (let i = 0; i < Math.ceil(n / 300); i++) await Api.funcion('push').catch(() => {});
-            toast('Versión ' + pub + ' liberada · aviso a ' + n + ' usuarios'); ir('mant');
-          } catch (er) { toast(er.message); }
-        };
-      }
+      C.innerHTML = html;
       C.onclick = async (e) => {
-        const t = e.target.closest('[data-s]'); if (t) return ir(t.dataset.s);
-        const al = e.target.closest('.alOk');
-        if (al) {
-          const c = al.closest('[data-slot]');
-          const arg = { p_slot: +c.dataset.slot, p_monto: +c.querySelector('.alM').value || 0, p_url: c.querySelector('.alU').value, p_texto: c.querySelector('.alT').value, p_activo: c.querySelector('input[type=radio]').checked };
-          if (c.dataset.tipo === 'premium_anual') arg.p_tipo = 'premium_anual';
-          try { await Api.rpc('admin_guardar_link', arg); toast('Guardado'); ir('precios'); } catch (er) { toast(er.message); }
-          return;
-        }
-        const pl = e.target.closest('.plOk');
-        if (pl) {
-          const c = pl.closest('[data-plan]'), lim = {};
-          c.querySelectorAll('[data-k]').forEach((i) => { lim[i.dataset.k] = i.type === 'checkbox' ? i.checked : (+i.value || 0); });
-          try {
-            await Api.rpc('admin_guardar_plan', { p_codigo: c.dataset.plan, p_nombre: c.querySelector('.plN').value, p_descripcion: c.querySelector('.plDe').value, p_limites: lim,
-              p_beneficios: c.querySelector('.plB').value.split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: +c.querySelector('.plD').value || 30 });
-            toast('Plan guardado'); ir('planes');
-          } catch (er) { toast(er.message); }
-          return;
-        }
         if (e.target.id === 'rgOk') {
           const p = {}; C.querySelectorAll('[data-r]').forEach((i) => { if (i.value !== '') p[i.dataset.r] = +i.value; });
           try { await Api.rpc('admin_guardar_config', { p }); toast('Reglas guardadas'); } catch (er) { toast(er.message); }
-          return;
-        }
-        if (e.target.id === 'txOk') {
-          const p = {}; C.querySelectorAll('[data-t]').forEach((i) => { p[i.dataset.t] = i.value; });
-          try { await Api.rpc('admin_guardar_textos', { p }); toast('Textos guardados'); } catch (er) { toast(er.message); }
           return;
         }
         if (await accionBD(e.target)) return;
