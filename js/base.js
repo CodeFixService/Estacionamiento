@@ -305,7 +305,7 @@
       try { if (c) localStorage.setItem('est:cuenta', JSON.stringify(c)); else localStorage.removeItem('est:cuenta'); } catch (e) { /* nada */ }
       if (c) aplicarColor(c.color);
       // Núcleo (premium.js): con Premium la app se ve dorada y la primera vez saluda.
-      if (c && !c.admin) (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && CFX_PREMIUM.marcar({ premium: !!c.premium && c.plan_origen !== 'prueba', id: c.id, hasta: c.premium_hasta }));
+      if (c && !c.admin) (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && (window.CFX_AYUDA_PEND = { rpc: rpc, app: 'estaciona' }, window.CFX_AYUDA && CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND), true) && CFX_PREMIUM.marcar({ premium: !!c.premium && c.plan_origen !== 'prueba', id: c.id, hasta: c.premium_hasta }));
       document.dispatchEvent(new CustomEvent('cuenta'));
     },
     async ingresar(email, clave) {
