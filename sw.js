@@ -1,6 +1,6 @@
 /* Service worker de Estaciona: guarda la app en el celular para que abra rápido.
    Al publicar una versión nueva, cambia VERSION: la app muestra "Actualizar". */
-const VERSION = 'est-2.11.0';
+const VERSION = 'est-2.12.0';
 const ARCHIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/config.js', 'js/ayuda.js', 'js/premium.js', 'js/humano.js', 'js/verificar.js', 'js/pagos.js', 'js/respaldo.js', 'js/voz.js', 'js/fotos.js', 'js/auto.js', 'js/barra.js', 'css/tema.css', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
@@ -58,7 +58,7 @@ self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: e.data && e.data.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || 'Estaciona', {
-    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: d.tag, data: { url: d.url || './' }
+    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/badge.png', tag: d.tag, data: { url: d.url || './' }
   }));
 });
 
