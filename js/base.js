@@ -375,12 +375,8 @@
   }
 
   // Deja visible la pestaña activa de una barra deslizable (.seg / .tabs) sin mover la página.
-  function centrarSeg(raiz) {
-    (raiz || document).querySelectorAll('.seg, .tabs').forEach((bar) => {
-      const on = bar.querySelector('.on'); if (!on) return;
-      bar.scrollLeft = Math.max(0, on.offsetLeft - bar.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2);
-    });
-  }
+  // (El núcleo recuerda dónde quedó cada tira; aquí solo se asegura que la opción elegida se vea.)
+  function centrarSeg(raiz) { if (window.CodeFixTiras) window.CodeFixTiras.ajustar(raiz); }
   g.U = {
     $, esc, clp, corto, hace, fecha, hora, fh, quedan, centrarSeg, ico, ponerIconos, sello, toast, modal, cerrarModal, confirmar, pedirTexto, amable,
     subirFoto, FOTO, urlFoto, urlMini, urlPrivada, imgMini, avatar, nombreCon, estrellas, rutValido, rutFormato, qrCanvas, mostrarQR,

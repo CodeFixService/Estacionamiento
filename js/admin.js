@@ -7,7 +7,7 @@
   const V = $('vista');
   const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['usuarios', 'Usuarios'],
     ['estacionamientos', 'Estacionamientos'], ['ajustes', 'Ajustes']];
-  const BD = 11; // versión de base de datos que espera esta app
+  const BD = 12; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   // Base de datos: se actualiza sola cada 10 minutos (desde GitHub). Aquí solo se ve su estado.
@@ -218,7 +218,8 @@
       window.CFX_AJUSTES.montar(C, [
         { k: 'reglas', ico: '⏱️', t: 'Reglas', d: 'Pagos, devoluciones y mensajes', abrir: (z) => VISTAS.seccion(z, 'reglas', a) },
         { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y función "enviar"', abrir: (z) => VISTAS.seccion(z, 'push', a) },
-        { k: 'mant', ico: '🧹', t: 'Mantención', d: 'Limpieza y base de datos', abrir: (z) => VISTAS.seccion(z, 'mant', a) }
+        { k: 'mant', ico: '🧹', t: 'Mantención', d: 'Limpieza y base de datos', abrir: (z) => VISTAS.seccion(z, 'mant', a) },
+        { k: 'registro', ico: '📜', t: 'Registro de cambios', d: 'Lo que se hizo en el panel', abrir: (z) => window.CFX_AJUSTES.registro(z, (f, x) => Api.rpc(f, x), { lista: true }) }
       ], { arriba: '<p class="small muted" style="margin:0 0 10px">Precios, planes, textos, keys, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
     },
     async seccion(C, sub, a) {
