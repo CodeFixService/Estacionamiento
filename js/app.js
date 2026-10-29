@@ -276,11 +276,13 @@
     let l, p;
     try { [l, p] = await Promise.all([Api.rpc('mis_arriendos'), Api.rpc('panel')]); } catch (e) { $('rsC').innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; return; }
     f = f || (p.revisar ? 'revisar' : filtrar(l, 'mias').length ? 'mias' : 'proximas');
-    const falta = [p.falta.verificar && ['#/verificar', '🪪 Verifica tu identidad'], p.falta.whatsapp && ['#/mas/perfil', '📲 Agrega tu WhatsApp'],
-      p.falta.link && ['#/mas/links', '💳 Configura tu link de pago'], p.falta.publicar && ['#/publicar', '🅿️ Publica tu estacionamiento']].filter(Boolean);
+    // Quien solo arrienda ve solo "verifica tu identidad"; WhatsApp, link de pago y publicar son de quien publica. El admin no ve nada.
+    const dueno = !!(Api.cuenta && Api.cuenta.uso && Api.cuenta.uso.publicados > 0);
+    const falta = Api.admin() ? [] : [p.falta.verificar && ['#/verificar', '🪪 Verifica tu identidad'], dueno && p.falta.whatsapp && ['#/mas/perfil', '📲 Agrega tu WhatsApp'],
+      dueno && p.falta.link && ['#/mas/links', '💳 Configura tu link de pago']].filter(Boolean);
     const lista = filtrar(l, f);
     $('rsC').innerHTML = '<div class="kpis">' + [['revisar', '🧾 Por revisar', p.revisar], ['proximas', '📅 Hoy', p.hoy], ['pagando', '⏳ Esperando pago', p.pagando], ['devolver', '💸 Por devolver', p.devolver]]
-      .map((k) => '<a class="kpi" href="#/reservas/' + k[0] + '" style="color:var(--ink)"><b>' + k[2] + '</b><small>' + k[1] + '</small></a>').join('') + '</div>' +
+      .map((k) => '<a class="kpi" href="#/reservas/' + k[0] + '" style="color:var(--ink)"><b>' + k[2] + '</b><small class="t">' + k[1] + '</small></a>').join('') + '</div>' +
       (falta.length ? '<div class="card" style="margin-top:12px"><b>✅ Lo que te falta configurar</b>' + falta.map((x) => '<a class="row" style="margin-top:8px" href="' + x[0] + '">' + x[1] + ' →</a>').join('') + '</div>' : '') +
       '<div class="seg" style="margin-top:14px">' + FILTROS.map((t) => '<a href="#/reservas/' + t[0] + '" class="' + (t[0] === f ? 'on' : '') + '">' + t[1] + ' <small>' + filtrar(l, t[0]).length + '</small></a>').join('') + '</div>' +
       (lista.length ? lista.map(tarjetaArriendo).join('') : '<div class="vacio">' + ico('car') + '<p>' + (f === 'mias' ? 'Aún no arriendas. Busca en el mapa y reserva.' : 'Nada por aquí.') + '</p>' + (f === 'mias' ? '<a class="btn" href="#/">Ir al mapa</a>' : '') + '</div>');
@@ -467,17 +469,21 @@
   }
 
   /* ======================= Más (perfil, estacionamientos, links, plan…) ======================= */
-  const SUBS = [['perfil', '👤 Perfil'], ['estacionamientos', '🅿️ Mis estacionamientos'], ['links', '💳 Links de pago'], ['favoritos', '❤️ Favoritos'],
+  const SUBS = [['perfil', '👤 Perfil'], ['estacionamientos', '🚗 Mis estacionamientos'], ['links', '💳 Links de pago'], ['favoritos', '❤️ Favoritos'],
     ['plan', '⭐ Plan'], ['estadisticas', '📊 Estadísticas'], ['cuenta', '⚙️ Mi cuenta']];
   async function vMas(sub) {
+    // El admin solo administra: de Más solo usa Mi cuenta (lo demás es de usuarios); el resto va a sus Ajustes.
+    if (Api.admin() && sub !== 'cuenta') { location.replace('#/admin/ajustes'); return; }
     if (!sub) {  // Más: menú en cuadrícula; cada opción abre su sección (con la tira de secciones arriba)
-      V.innerHTML = '<h1>Más</h1><div class="cfx-grilla">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a href="#/mas/' + t[0] + '">' + t[1].replace(/^(\S+)\s/, '<span style="font-size:24px">$1</span>') + '</a>').join('') + '</div>';
+      // Igual que BiciTaller: tarjetas con íconos de línea (los pone iconos.js), sin título; cada sección se abre sola con ← para volver.
+      V.innerHTML = '<div class="cfx-grilla">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a class="op" href="#/mas/' + t[0] + '">' + t[1].replace(/^(\S+)\s/, '<span style="font-size:24px">$1</span>') + '</a>').join('') + '</div>';
       return;
     }
     if (sub === 'plan' && Api.admin()) sub = 'cuenta';
-    V.innerHTML = '<div class="seg">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a href="#/mas/' + t[0] + '" class="' + (t[0] === sub ? 'on' : '') + '">' + t[1] + '</a>').join('') + '</div><div id="masC"><div class="spin"></div></div>';
+    const st = SUBS.find((t) => t[0] === sub) || ['', 'Más'];
+    V.innerHTML = '<div class="row" style="align-items:center;gap:8px;margin-bottom:12px"><a class="icon-btn" href="#/mas" aria-label="Volver" data-sin-atras>' + ico('back') + '</a><h2 style="margin:0">' + esc(st[1]) + '</h2></div><div id="masC"><div class="spin"></div></div>';
+    U.ponerIconos(V);
     const T = $('masC');
-    U.centrarSeg(V);
     try {
       if (sub === 'perfil') return vEditarPerfil(T);
       if (sub === 'cuenta') return vCuenta(T);
@@ -667,7 +673,7 @@
       '<div class="row" style="margin-top:12px"><a class="btn sec grow" href="#/mas/perfil">' + ico('edit') + ' Editar perfil</a><a class="btn sec" href="#/u/' + a.id + '" aria-label="Ver mi perfil">' + ico('eye') + '</a><button class="btn sec" id="cQR" aria-label="Mi QR">' + ico('qr') + '</button></div></div>' +
       (a.suspendido ? '<div class="aviso bad" style="margin-top:12px">Tu cuenta está suspendida. Escribe a soporte.</div>' : '') +
       (!a.verificado && a.verif_estado === 'rechazada' ? '<div class="aviso bad" style="margin-top:12px">Tu verificación fue rechazada: ' + esc(a.verif_motivo || '') + '. <a href="#/verificar">Enviar de nuevo</a></div>' : '') +
-      (a.admin ? '<a class="btn dark block" style="margin-top:12px" href="#/admin">' + ico('server') + ' Panel de administración</a>' : '') +
+
       '<div class="sec-tit">Mi QR y link para compartir</div><div class="card center">' +
       '<p class="small muted" style="margin-top:0">Quien lo escanee o abra el link ve tu perfil y tus estacionamientos.</p>' +
       '<div class="qr-caja" id="cQRv"></div><p class="small" style="word-break:break-all">' + esc(miLink) + '</p>' +
@@ -831,8 +837,7 @@
     const heroIni = '<div class="card center" style="background:linear-gradient(160deg,#0b1020,#1e3a8a);color:#fff;border:0"><div style="font-size:46px">⭐</div><h1>';
     const incluye = '<div class="card" style="margin-top:12px"><b>Incluye</b><ul class="small" style="margin:8px 0 0;padding-left:18px">' + ((pl.premium || {}).beneficios || []).map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>';
     if (modo === 'admin' || modo === 'vitalicio') {
-      T.innerHTML = heroIni + (modo === 'admin' ? 'Tienes todo incluido</h1><p style="opacity:.85">Eres el administrador: tú vendes Premium. Los precios y links de pago se cambian en Administración.</p>' +
-          '<a class="btn gold" href="#/admin/ajustes">💳 Precios y links</a></div>'
+      T.innerHTML = heroIni + (modo === 'admin' ? 'Tienes todo incluido</h1><p style="opacity:.85">Eres el administrador: tú vendes Premium. Precios, links de pago y planes se manejan en el Centro de Mando.</p></div>'
         : 'Premium de por vida</h1><p style="opacity:.85">Tienes todas las funciones Premium para siempre. ¡Gracias!</p></div>') + incluye;
       return;
     }
@@ -872,25 +877,33 @@
   }
 
   /* ======================= Avisos ======================= */
+  // Ventana de avisos (igual que BiciTaller): ✕ por aviso, "Borrar todos" y activar notificaciones, sin salir de donde estás.
   async function vAvisos() {
-    V.innerHTML = '<h1>Avisos</h1><div id="avC"><div class="spin"></div></div>';
+    const c = modal('<h2 style="margin:0 40px 8px 0">🔔 Avisos</h2><div id="avC" style="max-height:60vh;overflow:auto"><div class="spin"></div></div><div id="avPush"></div>');
+    U.pushActivo().then((on) => {
+      if (on || !$('avPush')) return;
+      $('avPush').innerHTML = '<div class="aviso" style="margin:12px 0 0;align-items:center"><span class="grow small">Activa las notificaciones para enterarte aunque tengas la app cerrada.</span><button class="btn small" id="avAct">Activar</button></div>';
+      $('avAct').onclick = async (e) => { e.target.disabled = true; try { await U.activarPush(); $('avPush').innerHTML = ''; toast('Notificaciones activadas 🔔'); } catch (er) { e.target.disabled = false; toast(er.message); } };
+    });
     try {
       const r = await Api.rpc('mis_notificaciones');
-      $('avC').innerHTML = r.length ? '<div class="row between" style="margin-bottom:8px"><span class="small muted">Se borran solos a los 30 días.</span><button class="btn sec small" id="avTodo">Borrar todos</button></div>' +
-        r.map((n) => '<a class="item" href="' + esc(n.url || '#/avisos') + '" style="' + (n.leida ? '' : 'border-color:var(--brand)') + '"><div class="grow"><b>' + esc(n.titulo) + '</b><div class="small">' + esc(n.cuerpo || '') + '</div><div class="small muted">' + hace(n.fecha) + '</div></div>' +
-          '<button class="icon-btn" data-quitar="' + n.id + '" aria-label="Borrar aviso">✕</button></a>').join('')
+      if (!$('avC')) return;
+      $('avC').innerHTML = r.length ? r.map((n) => '<a class="item" href="' + esc(n.url || '#/') + '" style="' + (n.leida ? '' : 'border-color:var(--brand)') + '"><div class="grow"><b>' + esc(n.titulo) + '</b><div class="small">' + esc(n.cuerpo || '') + '</div><div class="small muted">' + hace(n.fecha) + '</div></div>' +
+          '<button class="icon-btn" data-quitar="' + n.id + '" aria-label="Borrar aviso">✕</button></a>').join('') +
+          '<div class="row between" style="margin-top:10px"><span class="small muted">Se borran solos a los 30 días.</span><button class="btn sec small" id="avTodo">Borrar todos</button></div>'
         : '<div class="vacio">' + ico('bell') + '<p>No tienes avisos.</p></div>';
       U.ponerIconos($('avC'));
       $('avC').onclick = async (ev) => {
         const b = ev.target.closest('[data-quitar]'), todo = ev.target.closest('#avTodo');
-        if (!b && !todo) return;
+        if (!b && !todo) { if (ev.target.closest('a.item')) cerrarModal(); return; }
         ev.preventDefault();
         if (todo && !await confirmar('¿Borrar todos tus avisos?', 'Borrar', true)) return;
-        try { await Api.rpc('borrar_notificacion', { p_id: b ? +b.dataset.quitar : null }); if (b) b.closest('.item').remove(); else vAvisos(); contadores(); } catch (e) { fallo(e); }
+        try { await Api.rpc('borrar_notificacion', { p_id: b ? +b.dataset.quitar : null }); if (b) { b.closest('.item').remove(); if (!$('avC').querySelector('.item')) vAvisos(); } else vAvisos(); contadores(); } catch (e) { fallo(e); }
       };
       if (r.some((n) => !n.leida)) { await Api.rpc('marcar_leidas'); contadores(); }
-    } catch (e) { $('avC').innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
+    } catch (e) { if ($('avC')) $('avC').innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
   }
+
 
   /* ======================= Términos ======================= */
   function vLegal() {
@@ -915,11 +928,28 @@
       pon('bChat', c.mensajes); pon('bAvisos', c.avisos); pon('bMis', c.solicitudes);
     } catch (e) { /* sin red */ }
   }
+  // Administrador: barra propia (Resumen · Estacionamientos · + · Usuarios · Ajustes). El mapa sigue igual desde Estacionamientos → Ver en el mapa.
+  const NAV_ADMIN = { mapa: ['#/admin/resumen', '📊', 'Resumen', 'adm-resumen'], reservas: ['#/admin/estacionamientos', '🚗', 'Lugares', 'adm-estacionamientos'],
+    chat: ['#/admin/usuarios', '👥', 'Usuarios', 'adm-usuarios'], mas: ['#/admin/ajustes', '⚙️', 'Ajustes', 'adm-ajustes'] };
+  let navEsAdmin = null;
+  function navAdmin(si) {
+    if (navEsAdmin === si) return; navEsAdmin = si;
+    document.querySelectorAll('#nav a[data-r0], #nav a[data-r]').forEach((b) => {
+      const r0 = b.dataset.r0 || b.dataset.r; if (!NAV_ADMIN[r0] || (!si && !b.dataset.r0)) return;
+      if (!b.dataset.r0) { b.dataset.r0 = r0; b.dataset.h0 = b.getAttribute('href'); b.dataset.t0 = b.querySelector('small').textContent; b.dataset.i0 = b.querySelector('.i').innerHTML; }
+      const d = NAV_ADMIN[r0];
+      b.setAttribute('href', si ? d[0] : b.dataset.h0); b.dataset.r = si ? d[3] : r0;
+      b.querySelector('small').textContent = si ? d[2] : b.dataset.t0;
+      if (si) b.querySelector('.i').textContent = d[1]; else b.querySelector('.i').innerHTML = b.dataset.i0;
+      const bd = b.querySelector('.badge'); if (bd) bd.hidden = si;
+    });
+  }
   function cabecera() {
     const a = Api.cuenta;
-    $('btnEntrar').hidden = !!a; $('miniAv').hidden = !a; $('btnAvisos').hidden = !a; $('btnAdmin').hidden = !(a && a.admin);
+    $('btnEntrar').hidden = !!a; $('miniAv').hidden = !a; $('btnAvisos').hidden = !a; $('btnAvisos').onclick = (e) => { e.preventDefault(); if (Api.logueado()) vAvisos(); }; $('btnAdmin').hidden = !(a && a.admin);
     if (a) $('miniAv').innerHTML = avatar(a, 'xs');
     else ['bChat', 'bAvisos', 'bMis'].forEach((i) => $(i).classList.remove('on'));
+    navAdmin(!!(a && a.admin));
   }
 
   /* ======================= Router ======================= */
@@ -936,7 +966,7 @@
     [/^\/chat\/([0-9a-f-]{36})$/, 'chat', vConversacion, true],
     [/^\/verificar$/, 'mas', vVerificar, 'Crea tu cuenta para verificarte'],
     [/^\/premium$/, 'mas', (t) => vPremium(), false],
-    [/^\/avisos$/, '', vAvisos, true],
+    [/^\/avisos$/, '', () => { history.replaceState(null, '', '#/'); router(); vAvisos(); }, true],
     [/^\/legal$/, '', vLegal, false],
     [/^\/admin(?:\/(\w+))?$/, 'mas', (t) => g.Admin.vista(t), true]
   ];
@@ -952,8 +982,10 @@
     let ruta = RUTAS[0], m = null;
     for (const r of RUTAS) { m = h.match(r[0]); if (m) { ruta = r; break; } }
     if (!m) { location.hash = '#/'; return; }
+    if (Api.admin() && !h && !router.admin) { router.admin = 1; location.replace('#/admin/resumen'); return; }
     rutaActual = h;
-    document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.r === ruta[1]));
+    const activo = !Api.admin() ? ruta[1] : /^\/admin/.test(h) ? 'adm-' + (m[1] || 'resumen') : ruta[1] === 'mapa' ? 'adm-estacionamientos' : ruta[1];
+    document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.r === activo));
     const esMapa = !ruta[2];
     if (ruta[3] && !Api.logueado()) {
       // Sin sesión: se queda en el mapa y pide crear cuenta.
@@ -1045,6 +1077,6 @@
       if (rutaActual && !/^\/?$/.test(rutaActual)) router();
     }
   }
-  g.App = { actualizarAhora, mayor, router, contadores, fallo, pedirLogin, denunciar, MODAL, ESTADO_EST, precioTxt, planTxt };
+  g.App = { vCuenta, actualizarAhora, mayor, router, contadores, fallo, pedirLogin, denunciar, MODAL, ESTADO_EST, precioTxt, planTxt };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar); else iniciar();
 })(window);

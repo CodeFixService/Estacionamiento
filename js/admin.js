@@ -5,8 +5,6 @@
   const U = g.U, Api = g.Api;
   const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, imgMini, hace, fecha } = U;
   const V = $('vista');
-  const TABS = [['resumen', 'Resumen'], ['verificaciones', 'Verificaciones'], ['denuncias', 'Denuncias'], ['usuarios', 'Usuarios'],
-    ['estacionamientos', 'Estacionamientos'], ['ajustes', 'Ajustes']];
   const BD = 12; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
@@ -19,18 +17,20 @@
   }
   async function accionBD() { return false; }
 
-  function marco(tab, pend) {
-    V.innerHTML = '<h1>Administración</h1><div class="tabs">' +
-      TABS.map((t) => '<a href="#/admin/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + (pend && pend[t[0]] ? ' <span class="pill bad" style="padding:0 6px">' + pend[t[0]] + '</span>' : '') + '</a>').join('') +
-      '</div><div id="adC"><div class="spin"></div></div>';
+  // Sin pestañas arriba (la barra de abajo es del admin). Verificaciones y Denuncias se abren desde el Resumen, con ← para volver.
+  function marco(tab) {
+    const sub = { verificaciones: '🪪 Verificaciones', denuncias: '🚩 Denuncias' }[tab];
+    V.innerHTML = (sub ? '<div class="row" style="align-items:center;gap:8px;margin-bottom:12px"><a class="icon-btn" href="#/admin/resumen" aria-label="Volver" data-sin-atras>' + ico('back') + '</a><h2 style="margin:0">' + sub + '</h2></div>' : '') +
+      '<div id="adC"><div class="spin"></div></div>';
     return $('adC');
   }
+
   let pendientes = null;
   const err = (C, e) => { C.innerHTML = '<div class="aviso bad">' + esc(e.message) + '</div>'; };
 
   async function vista(tab) {
     tab = tab || 'resumen';
-    const C = marco(tab, pendientes);
+    const C = marco(tab);
     try { await (VISTAS[tab] || VISTAS.resumen)(C); U.ponerIconos(C); } catch (e) { err(C, e); }
     U.centrarSeg(V);
   }
@@ -39,21 +39,20 @@
     async resumen(C) {
       const r = await Api.rpc('admin_resumen');
       pendientes = { verificaciones: r.pend_verif, denuncias: r.pend_denuncias };
-      marco('resumen', pendientes); C = $('adC');
+      C = $('adC');
       const s = r.servidor, pDb = s.db / s.db_lim * 100, pSt = (s.fotos + s.privado) / s.st_lim * 100;
       const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
       const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
       C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
-        ((r.pend_verif || r.pend_denuncias) ? '<div class="aviso warn">' + [r.pend_verif && '<a href="#/admin/verificaciones">🪪 ' + r.pend_verif + ' verificación(es)</a>',
-        r.pend_denuncias && '<a href="#/admin/denuncias">🚩 ' + r.pend_denuncias + ' denuncia(s)</a>'].filter(Boolean).join(' · ') + ' por revisar</div>' : '') +
+        '<div class="cfx-grilla"><a class="op" href="#/admin/verificaciones"><span style="font-size:24px">🪪</span>Verificaciones' + (r.pend_verif ? '<i class="badge on">' + r.pend_verif + '</i>' : '') + '<small class="muted">Identidades por revisar</small></a>' +
+        '<a class="op" href="#/admin/denuncias"><span style="font-size:24px">🚩</span>Denuncias' + (r.pend_denuncias ? '<i class="badge on">' + r.pend_denuncias + '</i>' : '') + '<small class="muted">Reportes de usuarios</small></a></div>' +
         ((r.devoluciones || []).length ? '<div class="sec-tit">💸 Devoluciones atrasadas</div><div class="card stack">' + r.devoluciones.map((d) =>
           '<div class="row between"><div class="grow small"><b>' + esc(d.dueno.nombre) + '</b> debe ' + clp(d.monto) + ' a ' + esc(d.arrendatario.nombre) +
           '<div class="muted">"' + esc(d.titulo) + '" · desde ' + fecha(d.desde) + '</div></div><button class="btn sec small" data-dev="' + d.dueno.id + '">' + ico('chat') + ' Escribir</button></div>').join('') + '</div>' : '') +
         '<div class="kpis" style="margin-top:12px">' + [['Usuarios', r.usuarios], ['Nuevos (7 días)', r.nuevos7], ['Activos (7 días)', r.activos7], ['Verificados', r.verificados],
-          ['Premium pagados', r.premium], ['En prueba 7 días', r.prueba], ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles],
-          ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total], ['Ingresos del mes', clp(r.ingresos_mes)], ['Por vencer (7 días)', r.por_vencer],
-          ['Reservas en revisión', r.reservas_revision], ['Keys sin usar', r.keys_libres], ['Suspendidos', r.suspendidos]]
+          ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles], ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total],
+          ['Reservas en revisión', r.reservas_revision], ['Suspendidos', r.suspendidos]]
           .map((k) => '<div class="kpi"><b>' + k[1] + '</b><small>' + k[0] + '</small></div>').join('') + '</div>' +
         '<div class="sec-tit">' + ico('server') + ' Estado del servidor (Supabase gratis)</div><div class="card">' +
         '<div class="row between small"><b>Base de datos</b><span>' + sem(pDb) + ' · ' + mb(s.db) + ' de ' + mb(s.db_lim) + '</span></div><div class="barra"><i class="' + col(pDb) + '" style="width:' + Math.max(1, pDb) + '%"></i></div>' +
@@ -184,7 +183,7 @@
     },
 
     async estacionamientos(C) {
-      C.innerHTML = '<input id="eQ" placeholder="Buscar por título, comuna, dirección o dueño"><div id="eL"><div class="spin"></div></div><button class="btn line block" id="eMas" hidden style="margin-top:10px">Ver más</button>';
+      C.innerHTML = '<div class="row" style="gap:8px;margin-bottom:10px"><a class="btn line grow" href="#/">🗺️ Ver mapa</a><a class="btn grow" href="#/publicar">＋ Agregar</a></div><input id="eQ" style="margin-bottom:14px" placeholder="Buscar por título, comuna, dirección o dueño"><div id="eL"><div class="spin"></div></div><button class="btn line block" id="eMas" hidden style="margin-top:10px">Ver más</button>';
       let off = 0, t;
       const cargar = async (mas) => {
         off = mas ? off + 50 : 0;
@@ -219,6 +218,7 @@
         { k: 'reglas', ico: '⏱️', t: 'Reglas', d: 'Pagos, devoluciones y mensajes', abrir: (z) => VISTAS.seccion(z, 'reglas', a) },
         { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y función "enviar"', abrir: (z) => VISTAS.seccion(z, 'push', a) },
         { k: 'mant', ico: '🧹', t: 'Mantención', d: 'Limpieza y base de datos', abrir: (z) => VISTAS.seccion(z, 'mant', a) },
+        { k: 'cuenta', ico: '👤', t: 'Mi cuenta', d: 'Foto, nombre y clave', abrir: (z) => g.App.vCuenta(z) },
         { k: 'registro', ico: '📜', t: 'Registro de cambios', d: 'Lo que se hizo en el panel', abrir: (z) => window.CFX_AJUSTES.registro(z, (f, x) => Api.rpc(f, x), { lista: true }) }
       ], { arriba: '<p class="small muted" style="margin:0 0 10px">Precios, planes, textos, keys, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
     },

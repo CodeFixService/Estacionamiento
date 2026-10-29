@@ -307,7 +307,7 @@
       // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
       if (c) {
         window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'estaciona', admin: !!c.admin, premium: !!c.premium && c.plan_origen !== 'prueba', id: c.id, hasta: c.premium_hasta,
-          nombre: c.nombre, email: c.email, foto: c.avatar ? urlFoto(c.avatar) : null, quitar: '#btnAdmin, #miniAv', cuenta: '#/mas/cuenta', panel: c.admin ? '#/admin' : null,
+          nombre: c.admin ? '' : c.nombre, email: c.email, foto: c.avatar ? urlFoto(c.avatar) : null, quitar: '#btnAdmin, #miniAv', cuenta: '#/mas/cuenta', panel: c.admin ? '#/admin' : null,
           salir: async () => { await Api.salir(); location.hash = '#/'; location.reload(); } });
         if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
       }
