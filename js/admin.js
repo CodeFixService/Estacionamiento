@@ -214,6 +214,7 @@
     // Ajustes en cuadrícula (núcleo): solo lo propio de Estaciona.
     async ajustes(C) {
       const a = await Api.rpc('admin_config');
+      C.innerHTML = '';  // sin el spinner de carga debajo de la cuadrícula
       window.CFX_AJUSTES.montar(C, [
         { k: 'reglas', ico: '⏱️', t: 'Reglas', d: 'Pagos, devoluciones y mensajes', abrir: (z) => VISTAS.seccion(z, 'reglas', a) },
         { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y función "enviar"', abrir: (z) => VISTAS.seccion(z, 'push', a) },
