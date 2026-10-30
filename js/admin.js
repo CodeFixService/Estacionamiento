@@ -5,7 +5,7 @@
   const U = g.U, Api = g.Api;
   const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, imgMini, hace, fecha } = U;
   const V = $('vista');
-  const BD = 12; // versión de base de datos que espera esta app
+  const BD = 13; // versión de base de datos que espera esta app
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   // Base de datos: se actualiza sola cada 10 minutos (desde GitHub). Aquí solo se ve su estado.
