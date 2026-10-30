@@ -136,7 +136,7 @@
     },
 
     async usuarios(C) {
-      C.innerHTML = '<div class="row"><input id="uQ" placeholder="Buscar por nombre, correo o RUT" class="grow"><select id="uF" style="width:auto"><option value="">Todos</option><option value="premium">Premium</option><option value="gratis">Gratis</option><option value="por_vencer">Por vencer (7 días)</option><option value="inactivos">Inactivos (30 días)</option>' +
+      C.innerHTML = '<div class="row"><input id="uQ" placeholder="Nombre o RUT" class="grow"><select id="uF" style="width:auto"><option value="">Todos</option><option value="premium">Premium</option><option value="gratis">Gratis</option><option value="por_vencer">Por vencer (7 días)</option><option value="inactivos">Inactivos (30 días)</option>' +
         '<option value="verificados">Verificados</option><option value="sin_verificar">Sin verificar</option><option value="suspendidos">Suspendidos</option></select></div><div id="uL"><div class="spin"></div></div><button class="btn line block" id="uMas" hidden style="margin-top:10px">Ver más</button>';
       let off = 0, t;
       const cargar = async (mas) => {

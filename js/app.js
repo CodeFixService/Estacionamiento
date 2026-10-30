@@ -898,6 +898,7 @@
         if (!b && !todo) { if (ev.target.closest('a.item')) cerrarModal(); return; }
         ev.preventDefault();
         if (todo && !await confirmar('¿Borrar todos tus avisos?', 'Borrar', true)) return;
+        if (todo && window.CFX_ANIM) await window.CFX_ANIM.salirTodos();
         try { await Api.rpc('borrar_notificacion', { p_id: b ? +b.dataset.quitar : null }); if (b) { b.closest('.item').remove(); if (!$('avC').querySelector('.item')) vAvisos(); } else vAvisos(); contadores(); } catch (e) { fallo(e); }
       };
       if (r.some((n) => !n.leida)) { await Api.rpc('marcar_leidas'); contadores(); }
@@ -920,12 +921,16 @@
   }
 
   /* ======================= Contadores y cabecera ======================= */
+  let avisosAntes = null;
   async function contadores() {
     if (!Api.logueado() || document.hidden) return;
     try {
       const c = await Api.rpc('contadores');
       const pon = (id, n) => { const b = $(id); b.textContent = n > 99 ? '99+' : n; b.classList.toggle('on', n > 0); };
       pon('bChat', c.mensajes); pon('bAvisos', c.avisos); pon('bMis', c.solicitudes);
+      // Llegó un aviso con la app abierta → aviso emergente arriba (solo los de esta cuenta).
+      if (window.CFX_ANIM && avisosAntes != null && c.avisos > avisosAntes) Api.rpc('mis_notificaciones').then((r) => { const n = r.find((x) => !x.leida); if (n) window.CFX_ANIM.emergente({ titulo: n.titulo, cuerpo: n.cuerpo }); }).catch(() => {});
+      avisosAntes = c.avisos;
     } catch (e) { /* sin red */ }
   }
   // Administrador: barra propia (Resumen · Estacionamientos · + · Usuarios · Ajustes). El mapa sigue igual desde Estacionamientos → Ver en el mapa.
