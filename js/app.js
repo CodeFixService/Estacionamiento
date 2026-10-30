@@ -939,6 +939,9 @@
   let navEsAdmin = null;
   function navAdmin(si) {
     if (navEsAdmin === si) return; navEsAdmin = si;
+    // Administrador: la cabecera dice solo "Administración" (sin el logo de Estaciona).
+    const lg = document.querySelector('header.top .logo');
+    if (lg) { lg.querySelector('.logo-p').style.display = si ? 'none' : ''; lg.querySelector('b').textContent = si ? 'Administración' : 'Estaciona'; lg.querySelector('b').style.fontSize = si ? '17px' : ''; }
     document.querySelectorAll('#nav a[data-r0], #nav a[data-r]').forEach((b) => {
       const r0 = b.dataset.r0 || b.dataset.r; if (!NAV_ADMIN[r0] || (!si && !b.dataset.r0)) return;
       if (!b.dataset.r0) { b.dataset.r0 = r0; b.dataset.h0 = b.getAttribute('href'); b.dataset.t0 = b.querySelector('small').textContent; b.dataset.i0 = b.querySelector('.i').innerHTML; }
