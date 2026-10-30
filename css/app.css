@@ -301,9 +301,9 @@ code.key { font: 700 15px ui-monospace, monospace; letter-spacing: .05em; }
 #mapa, .mini-mapa { background: #fff; }
 :root[data-theme="dark"] #mapa, :root[data-theme="dark"] .mini-mapa { background: #0b0f19; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #mapa, :root:not([data-theme="light"]) .mini-mapa { background: #0b0f19; } }
-.leaflet-control-attribution.creditos { font-size: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%; margin: 0 6px 6px 0 !important;
-  background: color-mix(in srgb, var(--card) 85%, transparent) !important; cursor: pointer; position: relative; }
-.leaflet-control-attribution.creditos::before { content: "i"; font: italic 700 13px/22px Georgia, serif; color: var(--muted); display: block; text-align: center; }
+.leaflet-control-attribution.creditos { font-size: 0; width: 26px; height: 26px; padding: 0; border-radius: 50%; margin: 0 10px 10px 0 !important;
+  background: var(--card) !important; border: 1px solid var(--line, rgba(0,0,0,.1)); box-shadow: 0 2px 8px rgba(0,0,0,.18); cursor: pointer; position: relative; }
+.leaflet-control-attribution.creditos::before { content: "i"; font: 700 13px/26px system-ui, sans-serif; color: var(--muted); display: block; text-align: center; }
 .leaflet-control-attribution.creditos.abierto { font-size: 11px; width: auto; height: auto; padding: 4px 8px; border-radius: 10px; }
 .leaflet-control-attribution.creditos.abierto::before { display: none; }
 .mapa-vista .leaflet-bottom.leaflet-right { bottom: 0; right: 70px; }

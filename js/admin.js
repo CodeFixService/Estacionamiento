@@ -183,7 +183,7 @@
     },
 
     async estacionamientos(C) {
-      C.innerHTML = '<div class="row" style="gap:8px;margin-bottom:10px"><a class="btn line grow" href="#/">🗺️ Ver mapa</a><a class="btn grow" href="#/publicar">＋ Agregar</a></div><input id="eQ" style="margin-bottom:14px" placeholder="Buscar por título, comuna, dirección o dueño"><div id="eL"><div class="spin"></div></div><button class="btn line block" id="eMas" hidden style="margin-top:10px">Ver más</button>';
+      C.innerHTML = '<div class="row" style="gap:8px;margin-bottom:10px"><a class="btn line grow" href="#/">🗺️ Ver mapa</a><a class="btn grow" href="#/publicar">＋ Agregar</a></div><input id="eQ" style="margin-bottom:14px" placeholder="Buscar lugar, comuna o dueño"><div id="eL"><div class="spin"></div></div><button class="btn line block" id="eMas" hidden style="margin-top:10px">Ver más</button>';
       let off = 0, t;
       const cargar = async (mas) => {
         off = mas ? off + 50 : 0;
