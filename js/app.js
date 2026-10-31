@@ -666,7 +666,6 @@
     const ver = a.verificado ? '<span class="pill ok">' + ico('shield') + ' Verificado</span>'
       : a.verif_estado === 'pendiente' ? '<span class="pill warn">🕐 Verificación en revisión</span>'
         : '<a class="pill bad" href="#/verificar">Sin verificar · Verificar ahora</a>';
-    const tema = document.documentElement.dataset.theme || '';
     const miLink = U.enlace('#/u/' + a.id), miColor = Api.puede('qr_color') ? a.color : '#000';
     T.innerHTML = '<div class="card"><div class="row">' + avatar(a, 'lg') + '<div class="grow"><h2 style="margin:0">' + nombreCon(a) + '</h2><div class="small muted ell">' + esc(a.email) + '</div>' +
       '<div class="row wrap" style="margin-top:6px">' + planTxt(a) + ver + '</div></div></div>' +
@@ -690,8 +689,7 @@
       '<div class="row"><select id="aKm" class="grow"><option value="0.5">500 m</option><option value="1">1 km</option><option value="2">2 km</option><option value="5">5 km</option></select>' +
       '<button class="btn small" id="aSet">Usar zona del mapa</button>' + (a.alerta ? '<button class="btn sec small" id="aDel">Quitar</button>' : '') + '</div></div>' +
       '<div class="sec-tit">Ajustes</div><div class="card stack">' +
-      '<div class="row between"><span>' + ico('bell') + ' Notificaciones en este celular</span><button class="btn small sec" id="cPush">Activar</button></div>' +
-      '<div class="row between"><span>🌓 Apariencia</span><select id="cTema" style="width:auto"><option value="">Automática</option><option value="light">Clara</option><option value="dark">Oscura</option></select></div>' +
+      '<div class="row between"><span>👤 Mi perfil: foto, color, modo y contraseña</span><a class="btn small sec" href="#/mas/perfil">Abrir</a></div>' +
       '<div class="row between"><span>🔄 Versión ' + esc(cfg.VERSION) + '</span><button class="btn small sec" id="cAct">Buscar actualización</button></div>' +
       '<div class="row between" id="cInstWrap" hidden><span>' + ico('download') + ' Instalar la app</span><button class="btn small" id="cInst">Instalar</button></div></div>' +
       '<div class="sec-tit">Respaldo</div><div class="card stack"><p class="small muted" style="margin:0">Descarga en Excel tus estacionamientos, arriendos y pagos. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
@@ -699,12 +697,9 @@
       '<div class="sec-tit">Ayuda</div><div class="card stack"><a href="#/chat" id="cSop" class="row" style="color:var(--ink)">' + ico('help') + ' Soporte (chat)</a>' +
       '<a href="#/legal" class="row" style="color:var(--ink)">' + ico('shield') + ' Términos y privacidad</a>' +
       '<button class="row btn line" id="cSalir" style="justify-content:flex-start">' + ico('logout') + ' Cerrar sesión</button></div>' +
-      (a.admin ? '' : '<button class="btn line block small" id="cBorrar" style="margin-top:20px;color:var(--bad)">Eliminar mi cuenta y mis datos</button>') +
       '<p class="pie">© ' + new Date().getFullYear() + ' ' + esc(cfg.MARCA) + ' · ' + esc(cfg.AUTOR) + '<br>Versión ' + esc(cfg.VERSION) + '</p>';
     U.ponerIconos(T);
-    $('cTema').value = tema;
     $('cAct').onclick = () => buscarVersion(true);
-    $('cTema').onchange = (e) => { U.aplicarTema(e.target.value); location.reload(); };
     $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', miLink, miColor);
     const qr = U.qrCanvas(miLink, miColor, 600); $('cQRv').appendChild(qr);
     const txt = '🅿️ Mira mi perfil y mis estacionamientos en *Estaciona*: ' + miLink;
@@ -721,8 +716,6 @@
       try { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: ll.lat, p_lng: ll.lng, p_km: +$('aKm').value })); toast('Alerta activada en la zona que estabas viendo en el mapa'); vCuenta(T); } catch (e) { fallo(e); }
     };
     if ($('aDel')) $('aDel').onclick = async () => { Api.guardar(await Api.rpc('guardar_alerta', { p_lat: null, p_lng: null, p_km: null })); vCuenta(T); };
-    U.pushActivo().then((on) => { if (on) { $('cPush').textContent = 'Activas ✓'; $('cPush').disabled = true; } });
-    $('cPush').onclick = async (e) => { e.target.disabled = true; try { await U.activarPush(); e.target.textContent = 'Activas ✓'; toast('Notificaciones activadas 🔔'); } catch (er) { e.target.disabled = false; toast(er.message); } };
     if (instalar) { $('cInstWrap').hidden = false; $('cInst').onclick = () => { instalar.prompt(); instalar = null; $('cInstWrap').hidden = true; }; }
     else if (/iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone) {
       $('cInstWrap').hidden = false; $('cInst').textContent = 'Cómo'; $('cInst').onclick = () => modal('<h2>Instalar en iPhone</h2><p>1. Abre esta página en <b>Safari</b>.<br>2. Toca <b>Compartir</b> (cuadrado con flecha).<br>3. Elige <b>Agregar a inicio</b>.</p>');
@@ -730,48 +723,48 @@
     if (!a.admin) $('cSop').onclick = async (e) => { e.preventDefault(); try { location.hash = '#/chat/' + await Api.rpc('soporte'); } catch (er) { fallo(er); } };
     $('cRespaldo').onclick = async () => { try { CFX_RESPALDO.excel('estaciona-' + (a.nombre || 'respaldo'), await Api.rpc('mi_respaldo')); toast('Respaldo descargado'); } catch (e) { fallo(e); } };
     $('cSalir').onclick = async () => { await Api.salir(); toast('Sesión cerrada'); location.hash = '#/'; };
-    if ($('cBorrar')) $('cBorrar').onclick = async () => {
-      if (!await confirmar('¿Eliminar tu cuenta? Se borran tu perfil, tus estacionamientos, fotos y mensajes. No se puede deshacer.', 'Eliminar para siempre', true)) return;
-      try { await Api.funcion('eliminar_usuario'); await Api.salir(); toast('Tu cuenta fue eliminada'); location.hash = '#/'; } catch (e) { toast(e.message); }
-    };
   }
 
+  // Perfil común del núcleo (ayuda.js → CFX_PERFIL): aquí solo cómo guarda Estaciona.
+  let avatarNuevo;
+  const guardarPerfil = async (o) => {
+    const a = Api.cuenta;
+    Api.guardar(await Api.rpc('guardar_perfil', Object.assign({ p_nombre: a.nombre, p_comuna: a.comuna || '', p_bio: a.bio || '', p_icono: a.icono || '', p_color: a.color, p_avatar: a.avatar, p_whatsapp: a.whatsapp || '' }, o)));
+    Api.empujar();
+  };
+  g.CFX_PERFIL_APP = {
+    nombre: () => Api.cuenta.nombre || '', correo: () => Api.cuenta.email,
+    foto: () => (Api.cuenta.avatar ? urlFoto(Api.cuenta.avatar) : ''),
+    guardarFoto: async (f) => { avatarNuevo = f ? await U.subirFoto(f, 'fotos', { lado: 320, calidad: 0.78, cuadrado: true }) : null; },
+    iconos: [''].concat(ICONOS), icono: () => Api.cuenta.icono || '', iconoQuitaFoto: true,
+    campos: () => { const a = Api.cuenta; return [{ k: 'whatsapp', t: 'WhatsApp (solo lo ve quien tiene una reserva contigo)', tipo: 'tel', max: 20, ph: '+56 9 1234 5678', v: a.whatsapp || '' },
+      { k: 'comuna', t: 'Comuna', max: 40, v: a.comuna || '' }, { k: 'bio', t: 'Sobre mí', tipo: 'area', max: 280, ph: 'Cuéntale a la comunidad quién eres', v: a.bio || '' }]; },
+    guardar: async (d) => {
+      const o = { p_nombre: d.nombre, p_comuna: d.comuna, p_bio: d.bio, p_icono: d.icono || '', p_whatsapp: d.whatsapp };
+      if (avatarNuevo !== undefined) o.p_avatar = avatarNuevo;
+      avatarNuevo = undefined;
+      await guardarPerfil(o);
+    },
+    colores: COLORES_GRATIS, libre: true, color: () => Api.cuenta.color, probarColor: U.aplicarColor,
+    guardarColor: async (c) => { U.aplicarColor(c); try { await guardarPerfil({ p_color: c }); } catch (e) { U.aplicarColor(Api.cuenta.color); throw e; } },
+    bloqueo: (que) => (que === 'libre' && !Api.puede('color_libre') ? 'Color libre (RGB)' : ''),
+    mejorar: () => { location.hash = '#/premium'; },
+    // El mapa cambia de estilo con el modo: se recarga la página (como antes).
+    modo: () => ({ light: 'claro', dark: 'oscuro' })[document.documentElement.dataset.theme] || 'auto',
+    guardarModo: (m) => { U.aplicarTema(({ claro: 'light', oscuro: 'dark' })[m] || ''); location.reload(); },
+    pushActiva: () => U.pushActivo(), activarPush: () => U.activarPush(),
+    clave: async (n) => { const { error } = await Api.sb.auth.updateUser({ password: n }); if (error) throw new Error(U.amable(error)); },
+    puedeEliminar: () => !Api.cuenta.admin,
+    eliminarTexto: 'Se borran tu perfil, tus estacionamientos, fotos y mensajes. No se puede deshacer.',
+    eliminar: async () => {
+      if (!await confirmar('¿Eliminar tu cuenta? Se borran tu perfil, tus estacionamientos, fotos y mensajes. No se puede deshacer.', 'Eliminar para siempre', true)) return;
+      await Api.funcion('eliminar_usuario'); await Api.salir(); toast('Tu cuenta fue eliminada'); location.hash = '#/';
+    }
+  };
   function vEditarPerfil(T) {
     T = T || V;
-    const a = Api.cuenta;
-    const st = { color: a.color, icono: a.icono || '', avatar: a.avatar, file: null };
-    const libre = Api.puede('color_libre');
-    T.innerHTML = '<div class="card"><div class="row"><span id="ePrev"></span><div class="grow"><button class="btn sec small" id="eFoto">' + ico('cam') + ' Cambiar foto</button>' +
-      (a.avatar ? ' <button class="btn line small" id="eQuitar">Quitar foto</button>' : '') + '<input type="file" id="eFile" accept="image/*" hidden></div></div>' +
-      '<label>O elige un ícono</label><div class="iconos" id="eIcos">' + ICONOS.map((i) => '<button type="button" data-ic="' + i + '">' + i + '</button>').join('') + '</div>' +
-      '<label>Nombre</label><input id="eNom" maxlength="60" value="' + esc(a.nombre) + '">' +
-      '<label>WhatsApp (solo lo ve quien tiene una reserva contigo)</label><input id="eWsp" type="tel" inputmode="tel" maxlength="20" placeholder="+56 9 1234 5678" value="' + esc(a.whatsapp || '') + '"><label>Comuna</label><input id="eCom" maxlength="40" value="' + esc(a.comuna || '') + '">' +
-      '<label>Sobre mí</label><textarea id="eBio" maxlength="280" placeholder="Cuéntale a la comunidad quién eres">' + esc(a.bio || '') + '</textarea>' +
-      '<label>Color del perfil</label><div class="colores" id="eCols">' + COLORES_GRATIS.map((c) => '<button type="button" class="color-op" title="' + c[0] + '" data-c="' + c[1] + '" style="background:' + c[1] + '"></button>').join('') + '</div>' +
-      '<div class="' + (libre ? '' : 'candado') + '" style="margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:12px"><div class="row"><input type="color" id="eRGB" value="' + esc(a.color) + '"' + (libre ? '' : ' disabled') + '>' +
-      '<div><b>Color libre (RGB)</b><div class="small muted">' + (libre ? 'Elige cualquier color.' : 'Cualquier color que quieras con <a href="#/premium">Premium</a>.') + '</div></div></div></div>' +
-      '<button class="btn block" id="eOk" style="margin-top:16px">Guardar</button></div>';
-    U.ponerIconos(T);
-    const prev = () => {
-      $('ePrev').innerHTML = st.file ? '<span class="av lg"><img src="' + URL.createObjectURL(st.file) + '"></span>' : avatar({ nombre: $('eNom').value, avatar: st.avatar, icono: st.icono, color: st.color, premium: a.premium }, 'lg');
-      $('eIcos').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.ic === st.icono));
-      $('eCols').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.c === st.color));
-    };
-    prev();
-    $('eFoto').onclick = () => $('eFile').click();
-    $('eFile').onchange = () => { st.file = $('eFile').files[0] || null; prev(); };
-    if ($('eQuitar')) $('eQuitar').onclick = () => { st.avatar = null; st.file = null; prev(); };
-    $('eIcos').onclick = (e) => { const b = e.target.closest('[data-ic]'); if (!b) return; st.icono = st.icono === b.dataset.ic ? '' : b.dataset.ic; st.avatar = null; st.file = null; prev(); };
-    $('eCols').onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; st.color = b.dataset.c; U.aplicarColor(st.color); prev(); };
-    $('eRGB').oninput = (e) => { st.color = e.target.value; U.aplicarColor(st.color); prev(); };
-    $('eOk').onclick = async (e) => {
-      e.target.disabled = true;
-      try {
-        if (st.file) { e.target.textContent = 'Subiendo foto…'; st.avatar = await U.subirFoto(st.file, 'fotos', { lado: 320, calidad: 0.78, cuadrado: true }); }
-        Api.guardar(await Api.rpc('guardar_perfil', { p_nombre: $('eNom').value, p_comuna: $('eCom').value, p_bio: $('eBio').value, p_icono: st.icono, p_color: st.color, p_avatar: st.avatar, p_whatsapp: $('eWsp').value }));
-        Api.empujar(); toast('Perfil guardado'); vEditarPerfil(T);
-      } catch (er) { U.aplicarColor(a.color); fallo(er); e.target.disabled = false; e.target.textContent = 'Guardar'; }
-    };
+    T.innerHTML = '<div class="card" id="miPerfil"></div>';
+    g.CFX_PERFIL.montar($('miPerfil'));
   }
 
   /* ======================= Verificación de identidad ======================= */
