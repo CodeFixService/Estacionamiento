@@ -723,7 +723,7 @@ begin
   else
     -- Libera el RUT para que pueda corregirlo.
     update public.verificaciones set rut = 'X' || p_id::text where usuario = p_id;
-    perform public._notificar(p_id, 'Verificación rechazada', coalesce(nullif(trim(p_motivo), ''), 'Fotos poco claras') || '. Vuelve a enviarla.', '#/verificar');
+    perform public._notificar(p_id, '❌ Verificación rechazada', coalesce(nullif(trim(p_motivo), ''), 'Fotos poco claras') || '. Vuelve a enviarla.', '#/verificar');
   end if;
 end $$;
 
@@ -771,7 +771,7 @@ begin
   if p_accion = 'ocultar' and d.tipo = 'estacionamiento' then update public.estacionamientos set estado = 'oculto' where id = d.objetivo; end if;
   update public.denuncias set estado = case when p_accion = 'descartar' then 'descartada' else 'resuelta' end,
     resolucion = left(coalesce(nullif(trim(p_nota), ''), p_accion), 200) where id = p_id;
-  perform public._notificar(d.autor, 'Revisamos tu denuncia', case when p_accion = 'descartar' then 'No encontramos una falta. Gracias por avisar.'
+  perform public._notificar(d.autor, '🛡️ Revisamos tu denuncia', case when p_accion = 'descartar' then 'No encontramos una falta. Gracias por avisar.'
     else 'Tomamos medidas. Gracias por ayudar a cuidar la comunidad.' end, '#/avisos');
 end $$;
 
@@ -886,7 +886,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '14') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '15') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1237,7 +1237,7 @@ begin
     returning id, arrendatario, dueno loop
     n := n + 1;
     perform public._notificar(r.arrendatario, '⌛ Tu reserva se liberó', 'No alcanzaste a subir el comprobante a tiempo', '#/reservas');
-    perform public._notificar(r.dueno, 'Reserva liberada', 'Una reserva no se pagó a tiempo y se liberó', '#/reservas');
+    perform public._notificar(r.dueno, '⌛ Reserva liberada', 'Una reserva no se pagó a tiempo y se liberó', '#/reservas');
   end loop;
   perform public.finalizar_terminados();
   perform public.avisar_devoluciones();
@@ -1372,7 +1372,7 @@ begin
       update public.estacionamientos set estado = 'ocupado' where id = e.id and estado = 'disponible';
       for o in update public.arriendos set estado = 'rechazado', actualizado = now()
         where estacionamiento = e.id and estado = 'pendiente' and id <> p_id returning arrendatario loop
-        perform public._notificar(o.arrendatario, 'Solicitud no aceptada', '"' || e.titulo || '" ya fue arrendado', '#/reservas');
+        perform public._notificar(o.arrendatario, '❌ Solicitud no aceptada', '"' || e.titulo || '" ya fue arrendado', '#/reservas');
       end loop;
     end if;
   else
@@ -1381,7 +1381,7 @@ begin
       saldo_monto = a.saldo_aplicado,
       saldo_hasta = case when a.saldo_aplicado > 0 then now() + make_interval(days => public._cfg('dias_saldo')) end,
       actualizado = now() where id = p_id;
-    perform public._notificar(a.arrendatario, 'Reserva no aceptada', coalesce(nullif(trim(p_motivo), ''), 'El dueño de "' || e.titulo || '" no aceptó tu reserva'), '#/reservas');
+    perform public._notificar(a.arrendatario, '❌ Reserva no aceptada', coalesce(nullif(trim(p_motivo), ''), 'El dueño de "' || e.titulo || '" no aceptó tu reserva'), '#/reservas');
   end if;
 end $$;
 
@@ -1399,7 +1399,7 @@ begin
       pago_estado = case when a.saldo_aplicado > 0 then 'saldo' else 'sin_pago' end, saldo_monto = a.saldo_aplicado,
       saldo_hasta = case when a.saldo_aplicado > 0 then now() + make_interval(days => public._cfg('dias_saldo')) end,
       actualizado = now() where id = p_id;
-    perform public._notificar(otro, 'Reserva cancelada', yo.nombre || ' canceló la reserva de "' || t || '"', '#/reservas');
+    perform public._notificar(otro, '🚫 Reserva cancelada', yo.nombre || ' canceló la reserva de "' || t || '"', '#/reservas');
   elsif p_accion = 'cancelar' and a.estado in ('en_revision', 'aceptado') then
     res := case
       when pagado = 0 then 'sin_pago'
@@ -1414,7 +1414,7 @@ begin
       actualizado = now() where id = p_id;
     txt := case res when 'devolver' then 'Se debe devolver lo pagado' when 'saldo' then 'Lo pagado queda como saldo a favor'
       when 'perdido' then 'Se canceló con poca anticipación: no hay devolución' else '' end;
-    perform public._notificar(otro, 'Reserva cancelada', yo.nombre || ' canceló "' || t || '". ' || txt, '#/reservas');
+    perform public._notificar(otro, '🚫 Reserva cancelada', yo.nombre || ' canceló "' || t || '". ' || txt, '#/reservas');
   elsif p_accion = 'finalizar' and a.estado = 'aceptado' then
     update public.arriendos set estado = 'finalizado', actualizado = now() where id = p_id;
     perform public._notificar(otro, '⭐ Arriendo finalizado', 'Califica tu experiencia en "' || t || '"', '#/reservas');
@@ -1683,7 +1683,7 @@ begin
     perform public.admin_premium(g.usuario, d);
     update public.perfiles set plan_origen = 'pago' where id = g.usuario;
   else
-    perform public._notificar(g.usuario, 'Pago no aprobado', coalesce(nullif(trim(p_motivo), ''), 'No encontramos tu pago') || '. Escríbenos a soporte.', '#/premium');
+    perform public._notificar(g.usuario, '❌ Pago no aprobado', coalesce(nullif(trim(p_motivo), ''), 'No encontramos tu pago') || '. Escríbenos a soporte.', '#/premium');
   end if;
 end $$;
 
@@ -2406,6 +2406,28 @@ begin
   return n;
 end $$;
 
+-- ---------- Nueva versión disponible: push a todos al liberar (una sola vez por versión) ----------
+-- La llama el Centro de Mando después de liberar (Apps → Liberar) con las notas que se escriben ahí.
+create table if not exists public.cfx_versiones (version text primary key, notas text not null default '', avisados int not null default 0, creado timestamptz not null default now());
+alter table public.cfx_versiones enable row level security;
+create or replace function public.cfx_avisar_version(p_version text, p_notas text default '', p_app text default '') returns int
+language plpgsql security definer set search_path = '' as $$
+declare u uuid; n int := 0; v text := trim(coalesce(p_version, '')); nt text := left(trim(coalesce(p_notas, '')), 140);
+begin
+  perform public.cfx_es_admin();
+  if v !~ '^[0-9]+(\.[0-9]+){0,3}$' then raise exception 'Versión no válida'; end if;
+  if exists (select 1 from public.cfx_versiones where version = v) then return 0; end if;
+  for u in select * from public.cfx_destinatarios('todos') loop
+    perform public.cfx_avisar(u, '🚀 Nueva versión disponible', left(coalesce(nullif(trim(p_app), '') || ' ', '') || 'v' || v || case when nt <> '' then ' · ' || nt else '' end || '. Se actualiza sola al abrirla.', 240));
+    n := n + 1;
+  end loop;
+  insert into public.cfx_versiones (version, notas, avisados) values (v, nt, n);
+  perform public.cfx_anotar('version', 'v' || v || ' avisada a ' || n);
+  return n;
+end $$;
+revoke execute on function public.cfx_avisar_version(text, text, text) from public, anon;
+grant execute on function public.cfx_avisar_version(text, text, text) to authenticated;
+
 -- ---------- Keys de Premium (de un solo uso). Se guardan cifradas: el código completo solo se ve al crearlas. ----------
 create or replace function public.cfx_keys_crear(p_n int, p_rol text, p_dias int, p_nota text default '') returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -2941,7 +2963,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;

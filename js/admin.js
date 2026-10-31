@@ -40,9 +40,6 @@
       const r = await Api.rpc('admin_resumen');
       pendientes = { verificaciones: r.pend_verif, denuncias: r.pend_denuncias };
       C = $('adC');
-      const s = r.servidor, pDb = s.db / s.db_lim * 100, pSt = (s.fotos + s.privado) / s.st_lim * 100;
-      const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
-      const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
       C.innerHTML = (Number(r.version_bd || 1) < BD ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
         '<div class="cfx-grilla"><a class="op" href="#/admin/verificaciones"><span style="font-size:24px">🪪</span>Verificaciones' + (r.pend_verif ? '<i class="badge on">' + r.pend_verif + '</i>' : '') + '<small class="muted">Identidades por revisar</small></a>' +
@@ -54,12 +51,9 @@
           ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles], ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total],
           ['Reservas en revisión', r.reservas_revision], ['Suspendidos', r.suspendidos]]
           .map((k) => '<div class="kpi"><b>' + k[1] + '</b><small>' + k[0] + '</small></div>').join('') + '</div>' +
-        '<div class="sec-tit">' + ico('server') + ' Estado del servidor (Supabase gratis)</div><div class="card">' +
-        '<div class="row between small"><b>Base de datos</b><span>' + sem(pDb) + ' · ' + mb(s.db) + ' de ' + mb(s.db_lim) + '</span></div><div class="barra"><i class="' + col(pDb) + '" style="width:' + Math.max(1, pDb) + '%"></i></div>' +
-        '<div class="row between small" style="margin-top:12px"><b>Fotos y archivos</b><span>' + sem(pSt) + ' · ' + mb(s.fotos + s.privado) + ' de ' + mb(s.st_lim) + '</span></div><div class="barra"><i class="' + col(pSt) + '" style="width:' + Math.max(1, pSt) + '%"></i></div>' +
-        '<p class="small muted">' + s.archivos + ' archivos · ' + s.mensajes + ' mensajes guardados · ' + s.por_borrar + ' archivos por borrar. Los mensajes se borran solos a los 30 días y las fotos se guardan comprimidas (WebP).</p>' +
-        '<button class="btn sec small" id="aLimpiar">🧹 Limpiar ahora</button>' +
-        '<details style="margin-top:10px"><summary class="small">Tamaño por tabla</summary><table class="tabla">' + (r.tablas || []).map((t) => '<tr><td>' + esc(t.t) + '</td><td>' + t.n + ' filas</td><td>' + mb(t.b) + '</td></tr>').join('') + '</table></details></div>' +
+        // El uso del servidor se ve en el Centro de Mando → Resumen (carrusel de servidores); aquí solo la limpieza.
+        '<div class="sec-tit">🧹 Limpieza</div><div class="card"><p class="small muted" style="margin-top:0">Los mensajes se borran solos a los 30 días y las fotos se guardan comprimidas. También puedes limpiar ahora:</p>' +
+        '<button class="btn sec small" id="aLimpiar">🧹 Limpiar ahora</button></div>' +
         '<div class="sec-tit">Registros últimos 14 días</div><div class="card"><div class="barras">' + r.registros.map((x) => '<div title="' + esc(x.d) + ': ' + x.n + '" style="height:' + (x.n / maxR * 100) + '%"></div>').join('') + '</div></div>' +
         '<div class="sec-tit">Comunas con más estacionamientos</div><div class="card">' + (r.comunas.length ? r.comunas.map((c) => '<div class="row between"><span>' + esc(c.c) + '</span><b>' + c.n + '</b></div>').join('') : '<span class="muted">Aún no hay</span>') + '</div>' +
         '<div class="sec-tit">Compartir la app</div><div class="card center"><div class="qr-caja" id="aQR"></div><p class="small" style="word-break:break-all">' + esc(U.enlace('')) + '</p>' +

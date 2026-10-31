@@ -487,7 +487,7 @@
         !adm && { k: 'favoritos', ico: '❤️', t: 'Favoritos', grupo: g, abrir: en(vFavoritos) },
         !adm && { k: 'estadisticas', ico: '📊', t: 'Estadísticas', grupo: g, abrir: en(vEstadisticas) },
         !adm && { k: 'premium', ico: '⭐', t: 'Mi plan', dato: Api.cuenta.premium ? (Api.cuenta.plan_origen === 'prueba' ? 'Prueba' : 'Premium') : 'Free', grupo: 'Tu plan', abrir: en(vPremium) },
-        { k: 'cuenta', ico: '⚙️', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
+        { k: 'cuenta', ico: 'cuenta', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
       ]);
     }
     if (sub) setTimeout(() => (sub === 'perfil' ? MENU_MAS.abrir('yo') : MENU_MAS.abrir(sub === 'plan' ? 'premium' : sub)), 0);
