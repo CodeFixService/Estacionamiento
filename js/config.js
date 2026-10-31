@@ -6,8 +6,8 @@ window.EST_CONFIG = {
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'Estaciona',
   AUTOR: 'CodeFix',
-  VERSION: '2.14.16',
-  BD: 14, // versión de base que espera la app (supabase/instalar.sql → db_version y version.json → bd)
+  VERSION: '2.14.18',
+  BD: 15, // versión de base que espera la app (supabase/instalar.sql → db_version y version.json → bd)
   // Mapa: Santiago por defecto. OpenFreeMap (vectorial) y OpenStreetMap de respaldo: gratis y sin API key.
   CENTRO: [-33.4489, -70.6693],
   ZOOM: 12,
