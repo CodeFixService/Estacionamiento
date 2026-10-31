@@ -471,28 +471,26 @@
   /* ======================= Más (perfil, estacionamientos, links, plan…) ======================= */
   const SUBS = [['perfil', '👤 Perfil'], ['estacionamientos', '🚗 Mis estacionamientos'], ['links', '💳 Links de pago'], ['favoritos', '❤️ Favoritos'],
     ['plan', '⭐ Plan'], ['estadisticas', '📊 Estadísticas'], ['cuenta', '⚙️ Mi cuenta']];
+  let MENU_MAS = null;
   async function vMas(sub) {
     // El admin solo administra: de Más solo usa Mi cuenta (lo demás es de usuarios); el resto va a sus Ajustes.
     if (Api.admin() && sub !== 'cuenta') { location.replace('#/admin/ajustes'); return; }
-    if (!sub) {  // Más: menú en cuadrícula; cada opción abre su sección (con la tira de secciones arriba)
-      // Igual que BiciTaller: tarjetas con íconos de línea (los pone iconos.js), sin título; cada sección se abre sola con ← para volver.
-      V.innerHTML = '<div class="cfx-grilla">' + SUBS.filter((t) => !(t[0] === 'plan' && Api.admin())).map((t) => '<a class="op" href="#/mas/' + t[0] + '">' + t[1].replace(/^(\S+)\s/, '<span style="font-size:24px">$1</span>') + '</a>').join('') + '</div>';
-      return;
+    // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (la página no cambia).
+    // #/mas/<sección> abre directo esa hoja (la de perfil abre Foto y nombre).
+    if (!V.querySelector('#menuMas')) {
+      V.innerHTML = '<div id="menuMas"></div>';
+      const en = (fn) => (z) => { Promise.resolve(fn(z)).catch((e) => { z.innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }); };
+      const g = 'Tus estacionamientos', adm = Api.admin();
+      MENU_MAS = window.CFX_MENU.montar($('menuMas'), [
+        !adm && { k: 'estacionamientos', ico: '🚗', t: 'Mis estacionamientos', grupo: g, abrir: en(vPublicados) },
+        !adm && { k: 'links', ico: '💳', t: 'Links de pago', grupo: g, abrir: en(vLinks) },
+        !adm && { k: 'favoritos', ico: '❤️', t: 'Favoritos', grupo: g, abrir: en(vFavoritos) },
+        !adm && { k: 'estadisticas', ico: '📊', t: 'Estadísticas', grupo: g, abrir: en(vEstadisticas) },
+        !adm && { k: 'premium', ico: '⭐', t: 'Mi plan', dato: Api.cuenta.premium ? (Api.cuenta.plan_origen === 'prueba' ? 'Prueba' : 'Premium') : 'Free', grupo: 'Tu plan', abrir: en(vPremium) },
+        { k: 'cuenta', ico: '⚙️', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
+      ]);
     }
-    if (sub === 'plan' && Api.admin()) sub = 'cuenta';
-    const st = SUBS.find((t) => t[0] === sub) || ['', 'Más'];
-    V.innerHTML = '<div class="row" style="align-items:center;gap:8px;margin-bottom:12px"><a class="icon-btn" href="#/mas" aria-label="Volver" data-sin-atras>' + ico('back') + '</a><h2 style="margin:0">' + esc(st[1]) + '</h2></div><div id="masC"><div class="spin"></div></div>';
-    U.ponerIconos(V);
-    const T = $('masC');
-    try {
-      if (sub === 'perfil') return vEditarPerfil(T);
-      if (sub === 'cuenta') return vCuenta(T);
-      if (sub === 'plan') return vPremium(T);
-      if (sub === 'links') return vLinks(T);
-      if (sub === 'estadisticas') return vEstadisticas(T);
-      if (sub === 'favoritos') return vFavoritos(T);
-      return vPublicados(T);
-    } catch (e) { T.innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; }
+    if (sub) setTimeout(() => (sub === 'perfil' ? MENU_MAS.abrir('yo') : MENU_MAS.abrir(sub === 'plan' ? 'premium' : sub)), 0);
   }
 
   async function vPublicados(T) {
@@ -689,14 +687,12 @@
       '<div class="row"><select id="aKm" class="grow"><option value="0.5">500 m</option><option value="1">1 km</option><option value="2">2 km</option><option value="5">5 km</option></select>' +
       '<button class="btn small" id="aSet">Usar zona del mapa</button>' + (a.alerta ? '<button class="btn sec small" id="aDel">Quitar</button>' : '') + '</div></div>' +
       '<div class="sec-tit">Ajustes</div><div class="card stack">' +
-      '<div class="row between"><span>👤 Mi perfil: foto, color, modo y contraseña</span><a class="btn small sec" href="#/mas/perfil">Abrir</a></div>' +
       '<div class="row between"><span>🔄 Versión ' + esc(cfg.VERSION) + '</span><button class="btn small sec" id="cAct">Buscar actualización</button></div>' +
       '<div class="row between" id="cInstWrap" hidden><span>' + ico('download') + ' Instalar la app</span><button class="btn small" id="cInst">Instalar</button></div></div>' +
       '<div class="sec-tit">Respaldo</div><div class="card stack"><p class="small muted" style="margin:0">Descarga en Excel tus estacionamientos, arriendos y pagos. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
       '<button class="btn sec small" id="cRespaldo">' + ico('download') + ' Descargar respaldo (Excel)</button></div>' +
       '<div class="sec-tit">Ayuda</div><div class="card stack"><a href="#/chat" id="cSop" class="row" style="color:var(--ink)">' + ico('help') + ' Soporte (chat)</a>' +
-      '<a href="#/legal" class="row" style="color:var(--ink)">' + ico('shield') + ' Términos y privacidad</a>' +
-      '<button class="row btn line" id="cSalir" style="justify-content:flex-start">' + ico('logout') + ' Cerrar sesión</button></div>' +
+      '</div>' +
       '<p class="pie">© ' + new Date().getFullYear() + ' ' + esc(cfg.MARCA) + ' · ' + esc(cfg.AUTOR) + '<br>Versión ' + esc(cfg.VERSION) + '</p>';
     U.ponerIconos(T);
     $('cAct').onclick = () => buscarVersion(true);
@@ -722,7 +718,6 @@
     }
     if (!a.admin) $('cSop').onclick = async (e) => { e.preventDefault(); try { location.hash = '#/chat/' + await Api.rpc('soporte'); } catch (er) { fallo(er); } };
     $('cRespaldo').onclick = async () => { try { CFX_RESPALDO.excel('estaciona-' + (a.nombre || 'respaldo'), await Api.rpc('mi_respaldo')); toast('Respaldo descargado'); } catch (e) { fallo(e); } };
-    $('cSalir').onclick = async () => { await Api.salir(); toast('Sesión cerrada'); location.hash = '#/'; };
   }
 
   // Perfil común del núcleo (ayuda.js → CFX_PERFIL): aquí solo cómo guarda Estaciona.
