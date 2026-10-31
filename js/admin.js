@@ -5,12 +5,12 @@
   const U = g.U, Api = g.Api;
   const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, imgMini, hace, fecha } = U;
   const V = $('vista');
-  const BD = 13; // versión de base de datos que espera esta app
+  const BD = g.EST_CONFIG.BD; // una sola fuente: js/config.js
   const mb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 
   // Base de datos: se actualiza sola cada 10 minutos (desde GitHub). Aquí solo se ve su estado.
   function cardBD(inst) {
-    const al = inst === String(BD);
+    const al = Number(inst) >= BD; // más nueva que la app también está bien (la app es la que se pone al día)
     return '<div class="card"><h3 style="margin-top:0">🗄️ Base de datos</h3><table class="tabla"><tr><td>Instalada</td><td><b>' + esc(inst) + '</b></td></tr>' +
       '<tr><td>La que espera la app</td><td>' + BD + '</td></tr></table>' +
       '<p class="small">' + (al ? '✅ Al día. Se actualiza sola cuando hay una versión nueva.' : '⏳ Se está actualizando sola (máximo 10 minutos, no borra datos).') + '</p></div>';
@@ -44,7 +44,7 @@
       const col = (p) => p > 85 ? 'bad' : p > 60 ? 'warn' : '';
       const sem = (p) => p > 85 ? '🔴 Casi lleno' : p > 60 ? '🟡 Atención' : '🟢 Bien';
       const maxR = Math.max(1, ...r.registros.map((x) => x.n));
-      C.innerHTML = (String(r.version_bd) !== String(BD) ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
+      C.innerHTML = (Number(r.version_bd || 1) < BD ? '<div class="aviso bad">⚠️ La base de datos está en la versión ' + esc(r.version_bd || '1') + ' y la app espera la ' + BD + '.</div>' + cardBD(String(r.version_bd || '1')) : '') +
         '<div class="cfx-grilla"><a class="op" href="#/admin/verificaciones"><span style="font-size:24px">🪪</span>Verificaciones' + (r.pend_verif ? '<i class="badge on">' + r.pend_verif + '</i>' : '') + '<small class="muted">Identidades por revisar</small></a>' +
         '<a class="op" href="#/admin/denuncias"><span style="font-size:24px">🚩</span>Denuncias' + (r.pend_denuncias ? '<i class="badge on">' + r.pend_denuncias + '</i>' : '') + '<small class="muted">Reportes de usuarios</small></a></div>' +
         ((r.devoluciones || []).length ? '<div class="sec-tit">💸 Devoluciones atrasadas</div><div class="card stack">' + r.devoluciones.map((d) =>
