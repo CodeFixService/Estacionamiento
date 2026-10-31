@@ -44,7 +44,7 @@
   // Intenta el mapa vectorial limpio; si no dibuja nada en 8 s (o falla), usa OpenStreetMap en gris.
   function teselas(m) {
     const ref = { capa: null };
-    const respaldo = () => { if (ref.capa === 'raster' || !m.getContainer().isConnected) return; if (ref.capa) { try { m.removeLayer(ref.capa); } catch (e) { /* nada */ } } ref.capa = 'raster'; raster(m); };
+    const respaldo = () => { if (ref.capa === 'raster' || !m.getContainer().isConnected) return; if (ref.capa) { try { m.removeLayer(ref.capa); } catch (e) { /* nada */ } } ref.capa = 'raster'; ref.raster = raster(m); };
     if (!g.maplibregl || !L.maplibreGL) { respaldo(); return ref; }
     const reloj = setTimeout(respaldo, 8000);
     estiloLimpio().then((st) => {
@@ -199,6 +199,13 @@
     }, () => { if (!silencioso) toast('No pudimos obtener tu ubicación (revisa el permiso)'); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
   }
 
+  // Cambió el modo claro/oscuro: se cambian solo las teselas (sin recargar la página ni mover el mapa).
+  function repintar() {
+    if (!mapa || !capa) return;
+    [capa.capa, capa.raster].forEach((c) => { if (c && typeof c === 'object') { try { mapa.removeLayer(c); } catch (e) { /* nada */ } } });
+    capa.capa = 'raster'; // la vuelta vieja (si aún carga) ya no se agrega
+    capa = teselas(mapa);
+  }
   function iniciar() {
     if (iniciado) return;
     iniciado = true;
@@ -214,7 +221,7 @@
       clearTimeout(t); t = setTimeout(() => cargar(false), 300);
       try { sessionStorage.setItem('est:vista', JSON.stringify({ c: mapa.getCenter(), z: mapa.getZoom() })); } catch (e) { /* nada */ }
     });
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => location.reload());
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => repintar());
     $('btnCerca').onclick = () => cercaDeMi(false);
     $('btnFiltros').onclick = abrirFiltros;
     $('btnLista').onclick = () => { $('hojaLista').hidden = false; lista(); };
@@ -275,7 +282,7 @@
   }
 
   g.Mapa = {
-    iniciar, buscar, inverso, mini, selector, caracs,
+    iniciar, buscar, inverso, mini, selector, caracs, repintar,
     // Libera los mapas chicos (WebGL) al salir de una pantalla.
     limpiar() { while (minis.length) { try { minis.pop().remove(); } catch (e) { /* ya no existe */ } } },
     refrescar() { if (mapa) { setTimeout(() => { mapa.invalidateSize(); cargar(false); }, 60); } },

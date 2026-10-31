@@ -749,9 +749,9 @@
     guardarColor: async (c) => { U.aplicarColor(c); try { await guardarPerfil({ p_color: c }); } catch (e) { U.aplicarColor(Api.cuenta.color); throw e; } },
     bloqueo: (que) => (que === 'libre' && !Api.puede('color_libre') ? 'Color libre (RGB)' : ''),
     mejorar: () => { location.hash = '#/premium'; },
-    // El mapa cambia de estilo con el modo: se recarga la página (como antes).
+    // El mapa cambia sus teselas con el modo (sin recargar la página).
     modo: () => ({ light: 'claro', dark: 'oscuro' })[document.documentElement.dataset.theme] || 'auto',
-    guardarModo: (m) => { U.aplicarTema(({ claro: 'light', oscuro: 'dark' })[m] || ''); location.reload(); },
+    guardarModo: (m) => { U.aplicarTema(({ claro: 'light', oscuro: 'dark' })[m] || ''); if (g.Mapa && g.Mapa.repintar) g.Mapa.repintar(); },
     pushActiva: () => U.pushActivo(), activarPush: () => U.activarPush(),
     clave: async (n) => { const { error } = await Api.sb.auth.updateUser({ password: n }); if (error) throw new Error(U.amable(error)); },
     puedeEliminar: () => !Api.cuenta.admin,
