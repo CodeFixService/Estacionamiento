@@ -902,9 +902,11 @@
       '<h3>3. Publicaciones</h3><p>Quien publica declara que el estacionamiento le pertenece o que cuenta con autorización para arrendarlo (incluido el reglamento de copropiedad, si aplica), y que la información y las fotos son verdaderas. El administrador puede ocultar o eliminar publicaciones que no cumplan.</p>' +
       '<h3>4. Seguridad y conducta</h3><p>No pagues antes de ver el estacionamiento y conocer al dueño. El chat permite 3 mensajes seguidos y luego hay que esperar la respuesta, para evitar spam. Puedes bloquear y denunciar; las denuncias requieren evidencia y son revisadas por el administrador. Las denuncias falsas pueden llevar a la suspensión.</p>' +
       '<h3>5. Planes</h3><p>El plan Gratis permite 1 publicación y 1 arriendo activo. El plan Premium (pago único según el precio publicado) amplía estos límites y suma funciones. El primer pago de cada cuenta da 30 días de Premium. Si Premium vence, las publicaciones que superen el límite dejan de mostrarse en el mapa (no se borran).</p>' +
-      '<h3>6. Privacidad (Ley 19.628 y Ley 21.719)</h3><p>Tratamos tus datos solo para operar el servicio. Tu RUT, número de documento, correo y teléfono <b>nunca se muestran</b> a otros usuarios. Las fotos de la cédula y la selfie se eliminan apenas se revisa la verificación. La dirección exacta del estacionamiento solo la ve quien tiene un arriendo aceptado. Los mensajes se borran automáticamente a los 30 días. Puedes eliminar tu cuenta y tus datos en cualquier momento desde Cuenta. Para ejercer tus derechos de acceso, rectificación, supresión u oposición, escribe a soporte en la app.</p>' +
+      '<h3>6. Privacidad (Ley 19.628, modificada por la Ley 21.719)</h3><p>Tratamos tus datos solo para operar el servicio. Tu RUT, número de documento, correo y teléfono <b>nunca se muestran</b> a otros usuarios. Las fotos de la cédula y la selfie se eliminan apenas se revisa la verificación. La dirección exacta del estacionamiento solo la ve quien tiene un arriendo aceptado. Los mensajes se borran automáticamente a los 30 días. Puedes eliminar tu cuenta y tus datos en cualquier momento desde Cuenta. Para ejercer tus derechos de acceso, rectificación, supresión u oposición, escribe a soporte en la app.</p>' +
       '<h3>7. Responsabilidad</h3><p>Estaciona actúa como intermediario de contacto y no responde por el estado de los estacionamientos ni por los acuerdos entre usuarios, sin perjuicio de colaborar con las autoridades cuando corresponda.</p>' +
+      '<p><button type="button" class="btn sec small" data-ley="terminos">📄 Términos completos</button> <button type="button" class="btn sec small" data-ley="privacidad">🔒 Política de privacidad</button></p>' +
       '<p class="muted">© ' + new Date().getFullYear() + ' ' + esc(cfg.MARCA) + ' · ' + esc(cfg.AUTOR) + '. Todos los derechos reservados.</p></div>';
+    V.querySelectorAll('[data-ley]').forEach((b) => { b.onclick = () => window.CFX_LEGAL && window.CFX_LEGAL[b.dataset.ley]('estaciona'); });
     U.ponerIconos(V);
   }
 
@@ -1066,10 +1068,7 @@
     const a = Api.cuenta;
     if (a) {
       U.sincronizarPush(); contadores(); setInterval(contadores, 30000);
-      if (!a.acepto) {
-        const c = modal('<h2>Términos y privacidad</h2><p>Para seguir usando Estaciona acepta los <a href="#/legal">términos y la política de privacidad</a>.</p><button class="btn block" id="tOk">Acepto</button>');
-        c.querySelector('#tOk').onclick = async () => { await Api.rpc('aceptar_terminos'); cerrarModal(); Api.refrescar(); };
-      }
+      // Términos y privacidad: los pide el núcleo (CFX_LEGAL, ayuda.js) con versión.
       if (rutaActual && !/^\/?$/.test(rutaActual)) router();
     }
   }
