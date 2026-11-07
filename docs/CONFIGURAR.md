@@ -24,15 +24,14 @@ Se puede volver a ejecutar cuando haya una actualización: no borra datos.
 [`corto.ts`](../supabase/functions/enviar/corto.ts)) → nombre **`enviar`** → **Deploy function**.
 Luego en la función: **Details / Settings** → apaga **Verify JWT** → **Save changes**.
 
-## 5. Publicar en GitHub Pages
-GitHub → repositorio **Estacionamiento** → **Settings → Pages** → *Source*: **Deploy from a branch** →
-Branch **main** y carpeta **/ (root)** → **Save**. En 1–2 minutos queda en:
-`https://codefixservice.github.io/Estacionamiento/`
+## 5. Publicar (Cloudflare Workers)
+Cloudflare → **Workers & Pages** → worker **estacionamiento** (conectado al repo; publica solo cada cambio en `main`). Queda en:
+`https://estacionamiento.juanjosuecastilloloyola.workers.dev/`
 
 ## 6. Dirección de la app en Supabase
 **Authentication → URL Configuration**
-- Site URL: `https://codefixservice.github.io/Estacionamiento/` → Save
-- Redirect URLs → Add URL: `https://codefixservice.github.io/Estacionamiento/**` → Save URLs
+- Site URL: `https://estacionamiento.juanjosuecastilloloyola.workers.dev/` → Save
+- Redirect URLs → Add URL: `https://estacionamiento.juanjosuecastilloloyola.workers.dev/**` → Save URLs
 
 ## 7. Primer ingreso como admin
 1. Abre la app, toca **Ingresar** con la cuenta del paso 1 (verás **ADMIN** arriba).
