@@ -886,7 +886,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '20') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '21') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -2468,8 +2468,9 @@ begin
   end if;
   select * into k from public.cfx_keys where hash = encode(sha256(convert_to(c, 'UTF8')), 'hex') for update;
   if k.id is null or k.revocada or k.usada_por is not null then
+    -- Sin raise: si no, el registro se deshace y el límite de 10 por hora nunca cuenta (núcleo 2.48).
     insert into public.cfx_registro (quien, accion, detalle) values (coalesce(y ->> 'email', ''), 'key fallida', y ->> 'id');
-    raise exception 'Key no válida o ya usada';
+    return jsonb_build_object('error', 'Key no válida o ya usada');
   end if;
   if k.rol <> coalesce(y ->> 'rol', '') then raise exception 'Esta key es para cuentas de %', case when k.rol = 'negocio' then 'negocio' else 'cliente' end; end if;
   h := public.cfx_dar_premium((y ->> 'id')::uuid, k.rol, k.dias);
