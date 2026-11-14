@@ -3,7 +3,7 @@
 const VERSION = 'est-2.14.51';
 const ARCHIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/config.js', 'js/seguro.js', 'js/vitrina.js', 'js/datos.js', 'js/carga.js', 'js/ayuda.js', 'js/premium.js', 'js/humano.js', 'js/verificar.js', 'js/pagos.js', 'js/respaldo.js', 'js/voz.js', 'js/fotos.js', 'js/auto.js', 'js/barra.js', 'css/tema.css', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
+  'js/config.js', 'css/vendor/bootstrap-utilities.min.css', 'js/seguro.js', 'js/vitrina.js', 'js/datos.js', 'js/carga.js', 'js/ayuda.js', 'js/qr.js', 'js/modulos.js', 'js/premium.js', 'js/humano.js', 'js/verificar.js', 'js/pagos.js', 'js/respaldo.js', 'js/voz.js', 'js/fotos.js', 'js/auto.js', 'js/barra.js', 'css/tema.css', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
   'vendor/supabase.js', 'vendor/591.supabase.js', 'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css', 'vendor/leaflet-maplibre-gl.js',
   'vendor/leaflet.markercluster.js', 'vendor/MarkerCluster.css', 'vendor/qrcode.js',
   'icons/icon-192.png', 'icons/icon-512.png'

@@ -5,6 +5,10 @@
   const sb = g.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, storageKey: 'est-auth', detectSessionInUrl: true }
   });
+  // G35 · 🔒 Clave pausada tras 3 intentos (núcleo qr.js): se entra con el enlace al correo y se desbloquea solo.
+  const RAIZ_QR = new URL('../', document.currentScript ? document.currentScript.src : location.href).href;
+  const qrIni = () => g.CFX_QR.iniciar({ sb, funcion: 'enviar', qrLib: RAIZ_QR + 'vendor/qrcode.js' });
+  if (g.CFX_QR) qrIni(); else { const q = document.createElement('script'); q.src = RAIZ_QR + 'js/qr.js'; q.onload = qrIni; document.head.appendChild(q); }
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -314,8 +318,9 @@
       document.dispatchEvent(new CustomEvent('cuenta'));
     },
     async ingresar(email, clave) {
-      const { error } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: clave });
-      if (error) throw new Error(amable(error));
+      const pw = () => sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: clave });  // G35: 3 claves malas → enlace al correo
+      const { error } = await (g.CFX_QR ? g.CFX_QR.clave(email, pw) : pw());
+      if (error) throw new Error(error.code === 'cfx_bloqueado' ? error.message : amable(error));
       return this.refrescar();
     },
     async registrar(nombre, email, clave) {
