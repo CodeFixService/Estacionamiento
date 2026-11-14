@@ -699,7 +699,7 @@
     $('cQR').onclick = () => U.mostrarQR(a.nombre, 'Mi perfil en Estaciona', miLink, miColor);
     const qr = U.qrCanvas(miLink, miColor, 600); $('cQRv').appendChild(qr);
     const txt = '🅿️ Mira mi perfil y mis estacionamientos en *Estaciona*: ' + miLink;
-    $('cCop').onclick = async () => { try { await navigator.clipboard.writeText(miLink); toast('Link copiado'); } catch (e) { prompt('Copia el link:', miLink); } };
+    $('cCop').onclick = async () => { try { await navigator.clipboard.writeText(miLink); toast('Link copiado'); } catch (e) { if (window.CFX_DIALOGO) CFX_DIALOGO.pedir('Copia el link:', miLink, { si: 'Cerrar' }); else prompt('Copia el link:', miLink); } };
     $('cWA').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
     $('cComp').onclick = () => U.compartir(a.nombre + ' en Estaciona', txt, miLink);
     $('cDesc').onclick = () => { const l = document.createElement('a'); l.href = qr.toDataURL('image/png'); l.download = 'estaciona-mi-qr.png'; l.click(); };

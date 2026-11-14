@@ -241,7 +241,7 @@
   const enlace = (hash) => location.origin + location.pathname + hash;
   async function compartir(titulo, texto, url) {
     if (navigator.share) { try { await navigator.share({ title: titulo, text: texto, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
-    try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia el enlace:', url); }
+    try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { if (window.CFX_DIALOGO) CFX_DIALOGO.pedir('Copia el enlace:', url, { si: 'Cerrar' }); else prompt('Copia el enlace:', url); }
   }
   function mostrarQR(titulo, sub, url, color) {
     const c = modal('<div class="center"><h2>' + esc(titulo) + '</h2><p class="muted">' + esc(sub || '') + '</p><div class="qr-caja" id="qrC"></div>' +
