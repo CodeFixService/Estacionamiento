@@ -7,7 +7,33 @@
 import webpush from 'npm:web-push@3.6.7';
 import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2.45.4';
 
-const VERSION = '1.1';
+// ---------- G61 a · 📲 Push insistente (núcleo push.sql): cada aviso lleva su "grupo"; el celular confirma al recibirlo
+// (service worker → cfx_push_recibido). Sin confirmación se reenvía a 1, 2, 5, 10, 15, 30 min y luego cada 1 h, hasta 48 h.
+// deno-lint-ignore no-explicit-any
+type Rpc = { rpc: (f: string, a?: Record<string, unknown>) => any };
+type SubPush = { endpoint: string; p256dh: string; auth: string };
+const ACK_URL = (Deno.env.get('SUPABASE_URL') || '') + '/rest/v1/rpc/cfx_push_recibido';
+const ACK_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
+function conAck(payload: string, grupo: string) {
+  try { const o = JSON.parse(payload); o.ack = grupo; o.ackUrl = ACK_URL; o.ackKey = ACK_KEY; return JSON.stringify(o); } catch { return payload; }
+}
+async function anotarPush(s: Rpc, lista: (SubPush & { grupo: string; payload: string })[]) {
+  if (!lista.length) return;
+  try { await s.rpc('cfx_push_anotar', { p_lista: lista.map((x) => ({ grupo: x.grupo, endpoint: x.endpoint, p256dh: x.p256dh, auth: x.auth, payload: x.payload })) }); } catch { /* sin push.sql todavía */ }
+}
+async function reintentarPush(s: Rpc, preparar: () => Promise<boolean>) {
+  let data: (SubPush & { payload: string })[] | null = null;
+  try { const r = await s.rpc('cfx_push_tomar'); data = r.error ? null : r.data; } catch { return 0; }
+  if (!data?.length || !(await preparar())) return 0;
+  let n = 0;
+  await Promise.allSettled(data.map(async (e) => {
+    try { await webpush.sendNotification({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } }, e.payload, { TTL: 86400, urgency: 'high' }); n++; }
+    catch (err) { const c = (err as { statusCode?: number })?.statusCode; if (c === 404 || c === 410) await s.rpc('cfx_push_muerto', { p_endpoint: e.endpoint }); }
+  }));
+  return n;
+}
+
+const VERSION = '1.2';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -61,16 +87,19 @@ async function enviarPush(db: SupabaseClient) {
   const { data: subs } = await db.from('push_subs').select('endpoint, usuario, p256dh, auth').in('usuario', usuarios);
   let enviados = 0;
   const tareas: Promise<unknown>[] = [];
+  const anotar: (SubPush & { grupo: string; payload: string })[] = [];
   for (const n of pend) {
+    const g = crypto.randomUUID(), payload = conAck(JSON.stringify({ title: n.titulo, body: n.cuerpo || '', url: n.url || './', tag: 'n' + n.id }), g);
     for (const s of (subs || []).filter((x: { usuario: string }) => x.usuario === n.usuario)) {
-      const payload = JSON.stringify({ title: n.titulo, body: n.cuerpo || '', url: n.url || './', tag: 'n' + n.id });
-      tareas.push(webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 86400 })
+      anotar.push({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth, grupo: g, payload });
+      tareas.push(webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 86400, urgency: 'high' })
         .then(() => { enviados++; })
         .catch(async (e: { statusCode?: number }) => {
           if (e?.statusCode === 404 || e?.statusCode === 410) await db.from('push_subs').delete().eq('endpoint', s.endpoint);
         }));
     }
   }
+  await anotarPush(db, anotar);
   await Promise.allSettled(tareas);
   return { enviados };
 }
@@ -151,7 +180,13 @@ if (Deno.env.get('SUPABASE_URL')) {
         case 'limpiar':
           return json(await limpiar(db, req));
         default: {
-          const push = await enviarPush(db);
+          const reenviados = await reintentarPush(db, async () => {
+            const { data: aj } = await db.from('ajustes').select('clave, valor').in('clave', ['vapid_public', 'vapid_private']);
+            const k = Object.fromEntries((aj || []).map((r: { clave: string; valor: string }) => [r.clave, r.valor]));
+            if (!k.vapid_public || !k.vapid_private) return false;
+            webpush.setVapidDetails('mailto:soporte@codefix.app', k.vapid_public, k.vapid_private); return true;
+          });
+          const push = { ...(await enviarPush(db)), reenviados };
           const borrados = await procesarPorBorrar(db, 100);
           return json({ ok: true, ...push, borrados });
         }

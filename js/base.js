@@ -262,7 +262,6 @@
     if (!/^#[0-9a-f]{6}$/i.test(c || '')) c = '#2563eb';
     const r = document.documentElement.style;
     r.setProperty('--brand', c); r.setProperty('--brand-ink', tinta(c));
-    document.querySelector('meta[name=theme-color]').content = c;
     try { localStorage.setItem('est:color', c); } catch (e) { /* sin espacio */ }
   }
   function aplicarTema(t) {
