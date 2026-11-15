@@ -78,7 +78,7 @@
 
   /* ---------- Toast y modales ---------- */
   let tt;
-  function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2800); }
+  function toast(m) { if (window.CFX_AVISO) { window.CFX_AVISO(m); return; } const t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2800); }
   let alCerrar = null;
   function modal(html, onClose) {
     $('modalCuerpo').innerHTML = html; ponerIconos($('modalCuerpo'));
