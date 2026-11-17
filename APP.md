@@ -2,6 +2,11 @@
 
 (Mapa completo pendiente: G42j.)
 
+## 🅿️ Reservas (G84)
+- Tabla `arriendos` (instalar.sql ~l.71 + columnas ~l.955) · funciones: solicitar_arriendo (con p_patente), subir_comprobante, responder_arriendo, cerrar_arriendo (cancelar/finalizar/devuelto; finalizar antes = devolución proporcional en devolver_monto), pedir_extension / responder_extension (ext_*), mis_arriendos.
+- Patentes: tabla `patentes` + mis_patentes/guardar_patente/borrar_patente/patente_arriendo. Pantallas en js/app.js: reservar(), vReserva(), vPatentes() (Más → Mis patentes).
+- Versiones: js/config.js l.9 + version.json + instalar.sql ('version_bd'). Prueba: SaaS/pruebas/g84.js.
+
 ## 🧠 Del núcleo: falta aplicar aquí
 - G42e (núcleo 2.78): utilidades Bootstrap 5.3.8 ya usan los colores CodeFix (--bs-* → --cfx-*). Al revisar esta app: si quiere Bootstrap, enlazar vendor/bootstrap-utilities.min.css ANTES de su CSS (nunca el Bootstrap completo: choca con .btn/.card/.modal/.row/.toast).
 - G48 (núcleo 2.77): revisar en el celular ✋ mover secciones desde el título y 🎨 Color y modo → Colores a tu gusto (fondo, texto, íconos y +); si la app pinta íconos o fondo con colores fijos, pasarlos a var(--cfx-icono)/var(--cfx-fondo).

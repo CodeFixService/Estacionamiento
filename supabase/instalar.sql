@@ -359,6 +359,11 @@ begin
     if old.comprobante is not null and (tg_op = 'DELETE' or new.comprobante is distinct from old.comprobante) then
       insert into public.por_borrar (ruta) values ('privado/' || old.comprobante) on conflict do nothing;
     end if;
+    if tg_table_name = 'arriendos' and tg_op = 'DELETE' then
+      if old.ext_comprobante is not null then
+        insert into public.por_borrar (ruta) values ('privado/' || old.ext_comprobante) on conflict do nothing;
+      end if;
+    end if;
   end if;
   return coalesce(new, old);
 end $$;
@@ -886,7 +891,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '42') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '43') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -967,7 +972,23 @@ alter table public.arriendos
   add column if not exists comprobante_at timestamptz,
   add column if not exists motivo text,
   add column if not exists devolver_desde timestamptz,
-  add column if not exists devolver_aviso timestamptz;
+  add column if not exists devolver_aviso timestamptz,
+  -- G84: patente del auto · devolución parcial (terminar antes) · solicitud de más tiempo.
+  add column if not exists patente text,
+  add column if not exists devolver_monto int,
+  add column if not exists ext_cantidad int,
+  add column if not exists ext_monto int,
+  add column if not exists ext_comprobante text,
+  add column if not exists ext_at timestamptz;
+create table if not exists public.patentes (
+  id uuid primary key default gen_random_uuid(),
+  usuario uuid not null references public.perfiles (id) on delete cascade,
+  patente text not null,
+  alias text,
+  creado timestamptz not null default now(),
+  unique (usuario, patente)
+);
+alter table public.patentes enable row level security;
 update public.arriendos set devolver_desde = actualizado where pago_estado = 'devolver' and devolver_desde is null;
 alter table public.arriendos drop constraint if exists arriendos_estado_check;
 alter table public.arriendos add constraint arriendos_estado_check
@@ -1029,7 +1050,7 @@ $$;
 create or replace function public.puede_ver_privado(nombre text) returns boolean
 language sql stable security definer set search_path = public as $$
   select public.es_admin() or split_part(nombre, '/', 1) = auth.uid()::text
-    or exists (select 1 from public.arriendos a where a.comprobante = nombre and a.dueno = auth.uid())
+    or exists (select 1 from public.arriendos a where (a.comprobante = nombre or a.ext_comprobante = nombre) and a.dueno = auth.uid())
 $$;
 drop policy if exists "est privado ver" on storage.objects;
 create policy "est privado ver" on storage.objects for select to authenticated
@@ -1274,7 +1295,7 @@ begin
     from public.estacionamientos e, public.perfiles d
     where e.id = a.estacionamiento and d.id = a.dueno and a.pago_estado = 'devolver' and a.devolver_aviso is null
       and a.devolver_desde < now() - make_interval(days => greatest(public._cfg('dias_devolucion'), 1))
-    returning a.id, a.dueno, replace(to_char(a.monto_pagar + a.saldo_aplicado, 'FM999,999,999'), ',', '.') as monto, e.titulo, d.nombre loop
+    returning a.id, a.dueno, replace(to_char(coalesce(a.devolver_monto, a.monto_pagar + a.saldo_aplicado), 'FM999,999,999'), ',', '.') as monto, e.titulo, d.nombre loop
     n := n + 1;
     perform public._notificar(r.dueno, '💸 Tienes una devolución pendiente', 'Devuelve $' || r.monto || ' de "' || r.titulo || '" y márcalo como devuelto', '#/r/' || r.id);
     if adm is not null and adm <> r.dueno then
@@ -1285,10 +1306,23 @@ begin
 end $$;
 
 drop function if exists public.solicitar_arriendo(uuid, text, date, text);
-create or replace function public.solicitar_arriendo(p_id uuid, p_modalidad text, p_inicio timestamptz, p_cantidad int, p_nota text) returns uuid
+-- G84: la reserva lleva la patente del auto (opcional); la app antigua sigue llamando sin p_patente.
+drop function if exists public.solicitar_arriendo(uuid, text, timestamptz, int, text);
+create or replace function public._unidad(m text) returns interval language sql immutable as $$
+  select case m when 'hora' then interval '1 hour' when 'dia' then interval '1 day' else interval '1 month' end
+$$;
+create or replace function public._patente(t text) returns text
+language plpgsql immutable as $$
+declare p text := upper(regexp_replace(coalesce(t, ''), '[^A-Za-z0-9]', '', 'g'));
+begin
+  if p = '' then return null; end if;
+  if length(p) < 5 or length(p) > 8 then raise exception 'Patente no válida (ej: ABCD12)'; end if;
+  return p;
+end $$;
+create or replace function public.solicitar_arriendo(p_id uuid, p_modalidad text, p_inicio timestamptz, p_cantidad int, p_nota text, p_patente text default null) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare yo public.perfiles := public._yo(); e public.estacionamientos; nid uuid; precio int; unidad interval; v_fin timestamptz;
-  v_total int; v_pagar int; lk public.links_pago; v_saldo int := 0; max_c int;
+  v_total int; v_pagar int; lk public.links_pago; v_saldo int := 0; max_c int; v_pat text := public._patente(p_patente);
 begin
   perform public.liberar_vencidas();
   perform public._verificado(yo);
@@ -1314,7 +1348,7 @@ begin
     raise exception 'Tu plan permite % arriendo(s) a la vez. Hazte Premium para tener más.', public._lim(yo, 'arrendar');
   end if;
   if exists (select 1 from public.arriendos a where a.estacionamiento = p_id and a.estado in ('por_pagar', 'en_revision', 'aceptado')
-      and tstzrange(a.inicio, a.fin) && tstzrange(p_inicio, v_fin)) then
+      and tstzrange(a.inicio, a.fin + public._unidad(a.modalidad) * coalesce(a.ext_cantidad, 0)) && tstzrange(p_inicio, v_fin)) then
     raise exception 'Ese horario ya está reservado. Elige otro.';
   end if;
   v_total := precio * p_cantidad;
@@ -1328,12 +1362,16 @@ begin
   select coalesce(sum(saldo_monto), 0) into v_saldo from s;
   v_pagar := greatest(0, v_pagar - v_saldo);
   insert into public.arriendos (estacionamiento, dueno, arrendatario, modalidad, desde, inicio, fin, cantidad, total, monto_pagar,
-    saldo_aplicado, nota, estado, pago_estado, expira_at)
+    saldo_aplicado, nota, patente, estado, pago_estado, expira_at)
   values (p_id, e.dueno, yo.id, p_modalidad, (p_inicio at time zone 'America/Santiago')::date, p_inicio, v_fin, p_cantidad, v_total, v_pagar,
-    v_saldo, left(p_nota, 300), case when v_pagar > 0 then 'por_pagar' else 'en_revision' end,
+    v_saldo, left(p_nota, 300), v_pat, case when v_pagar > 0 then 'por_pagar' else 'en_revision' end,
     case when v_pagar > 0 then 'pendiente' else 'en_revision' end,
     now() + make_interval(mins => greatest(public._cfg('minutos_pago'), 5)))
   returning id into nid;
+  -- La patente usada queda guardada en "Mis patentes" (hasta 5) para la próxima vez.
+  if v_pat is not null and (select count(*) from public.patentes where usuario = yo.id) < 5 then
+    insert into public.patentes (usuario, patente) values (yo.id, v_pat) on conflict do nothing;
+  end if;
   perform public._notificar(e.dueno, case when v_pagar > 0 then '⏳ Nueva reserva: esperando pago' else '🧾 Nueva reserva por revisar' end,
     yo.nombre || ' reservó "' || e.titulo || '"', '#/reservas');
   return nid;
@@ -1388,6 +1426,7 @@ end $$;
 create or replace function public.cerrar_arriendo(p_id uuid, p_accion text) returns void
 language plpgsql security definer set search_path = public as $$
 declare yo public.perfiles := public._yo(); a public.arriendos; t text; otro uuid; pagado int; res text; txt text;
+  u interval; libres int := 0; dev int := 0;
 begin
   select * into a from public.arriendos where id = p_id for update;
   if not found or yo.id not in (a.dueno, a.arrendatario) then raise exception 'Reserva no encontrada'; end if;
@@ -1416,8 +1455,22 @@ begin
       when 'perdido' then 'Se canceló con poca anticipación: no hay devolución' else '' end;
     perform public._notificar(otro, '🚫 Reserva cancelada', yo.nombre || ' canceló "' || t || '". ' || txt, '#/reservas');
   elsif p_accion = 'finalizar' and a.estado = 'aceptado' then
-    update public.arriendos set estado = 'finalizado', actualizado = now() where id = p_id;
-    perform public._notificar(otro, '⭐ Arriendo finalizado', 'Califica tu experiencia en "' || t || '"', '#/reservas');
+    -- G84: terminar antes → se devuelve la parte pagada de las horas/días/meses completos que no se usaron.
+    u := public._unidad(a.modalidad);
+    if now() >= a.inicio and a.pago_estado = 'pagado' and pagado > 0 then
+      while libres < a.cantidad and now() + u * (libres + 1) <= a.fin loop libres := libres + 1; end loop;
+      dev := round(pagado::numeric * libres / greatest(a.cantidad, 1))::int;
+    end if;
+    update public.arriendos set estado = 'finalizado', actualizado = now(),
+      fin = case when libres > 0 then now() else fin end,
+      ext_cantidad = null, ext_monto = null, ext_at = null,
+      pago_estado = case when dev > 0 then 'devolver' else pago_estado end,
+      devolver_monto = case when dev > 0 then dev else devolver_monto end,
+      devolver_desde = case when dev > 0 then now() else devolver_desde end,
+      devolver_aviso = case when dev > 0 then null else devolver_aviso end
+    where id = p_id;
+    perform public._notificar(otro, '⭐ Arriendo finalizado', case when dev > 0 then yo.nombre || ' terminó antes: se devuelven $' ||
+      replace(to_char(dev, 'FM999,999,999'), ',', '.') || '. ' else '' end || 'Califica tu experiencia en "' || t || '"', '#/r/' || p_id);
   elsif p_accion = 'devuelto' and yo.id = a.dueno and a.pago_estado = 'devolver' then
     update public.arriendos set pago_estado = 'devuelto', actualizado = now() where id = p_id;
     perform public._notificar(otro, '💸 Te devolvieron el pago', 'El dueño de "' || t || '" marcó la devolución', '#/reservas');
@@ -1431,6 +1484,113 @@ begin
   end if;
 end $$;
 
+-- =====================================================================
+--  G84 · ⏱️ Más tiempo (lo pide quien arrienda, lo acepta el dueño) y 🚗 Mis patentes
+-- =====================================================================
+create or replace function public.pedir_extension(p_id uuid, p_cantidad int, p_ruta text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; u interval; max_c int; extra int; t text;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.estado <> 'aceptado' or a.fin <= now() then raise exception 'Solo puedes pedir más tiempo en una reserva confirmada y vigente'; end if;
+  if coalesce(p_cantidad, 0) = 0 then   -- retirar la solicitud
+    if a.ext_cantidad is not null and a.ext_comprobante is not null then
+      insert into public.por_borrar (ruta) values ('privado/' || a.ext_comprobante) on conflict do nothing;
+    end if;
+    update public.arriendos set ext_cantidad = null, ext_monto = null, ext_at = null,
+      ext_comprobante = case when a.ext_cantidad is not null then null else ext_comprobante end, actualizado = now() where id = p_id;
+    return;
+  end if;
+  if a.ext_cantidad is not null then raise exception 'Ya pediste más tiempo: espera la respuesta del dueño'; end if;
+  u := public._unidad(a.modalidad);
+  max_c := case a.modalidad when 'hora' then 24 when 'dia' then 31 else 12 end;
+  if p_cantidad < 1 or a.cantidad + p_cantidad > max_c then raise exception 'Cantidad no válida (máximo % en total)', max_c; end if;
+  if p_ruta is not null and p_ruta !~ ('^' || yo.id || '/[A-Za-z0-9._-]+$') then raise exception 'Sube la foto del comprobante'; end if;
+  if exists (select 1 from public.arriendos o where o.estacionamiento = a.estacionamiento and o.id <> a.id
+      and o.estado in ('por_pagar', 'en_revision', 'aceptado')
+      and tstzrange(o.inicio, o.fin + public._unidad(o.modalidad) * coalesce(o.ext_cantidad, 0)) && tstzrange(a.fin, a.fin + u * p_cantidad)) then
+    raise exception 'Ese horario ya lo reservó otra persona. Prueba con menos tiempo.';
+  end if;
+  extra := round(a.total::numeric / greatest(a.cantidad, 1))::int * p_cantidad;
+  if a.ext_comprobante is not null then   -- comprobante de una extensión anterior ya aceptada
+    insert into public.por_borrar (ruta) values ('privado/' || a.ext_comprobante) on conflict do nothing;
+  end if;
+  update public.arriendos set ext_cantidad = p_cantidad, ext_monto = extra, ext_comprobante = p_ruta, ext_at = now(), actualizado = now() where id = p_id;
+  select titulo into t from public.estacionamientos where id = a.estacionamiento;
+  perform public._notificar(a.dueno, '⏱️ Te piden más tiempo', yo.nombre || ' quiere seguir en "' || t || '". Acepta o rechaza', '#/r/' || p_id);
+end $$;
+
+create or replace function public.responder_extension(p_id uuid, p_aceptar boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; u interval; t text;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.dueno <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.ext_cantidad is null then raise exception 'No hay una solicitud de más tiempo'; end if;
+  select titulo into t from public.estacionamientos where id = a.estacionamiento;
+  if p_aceptar then
+    if a.estado <> 'aceptado' then raise exception 'Esta reserva ya terminó'; end if;
+    u := public._unidad(a.modalidad);
+    if exists (select 1 from public.arriendos o where o.estacionamiento = a.estacionamiento and o.id <> a.id
+        and o.estado in ('por_pagar', 'en_revision', 'aceptado')
+        and tstzrange(o.inicio, o.fin) && tstzrange(a.fin, a.fin + u * a.ext_cantidad)) then
+      raise exception 'Ese horario ya está reservado por otra persona';
+    end if;
+    update public.arriendos set fin = a.fin + u * a.ext_cantidad, cantidad = a.cantidad + a.ext_cantidad, total = a.total + a.ext_monto,
+      monto_pagar = a.monto_pagar + case when a.ext_comprobante is not null then a.ext_monto else 0 end,
+      ext_cantidad = null, ext_monto = null, ext_at = null, actualizado = now() where id = p_id;
+    perform public._notificar(a.arrendatario, '✅ Tienes más tiempo', 'El dueño de "' || t || '" aceptó extender tu reserva', '#/r/' || p_id);
+  else
+    if a.ext_comprobante is not null then
+      insert into public.por_borrar (ruta) values ('privado/' || a.ext_comprobante) on conflict do nothing;
+    end if;
+    update public.arriendos set ext_cantidad = null, ext_monto = null, ext_comprobante = null, ext_at = null, actualizado = now() where id = p_id;
+    perform public._notificar(a.arrendatario, '❌ Sin más tiempo', 'El dueño de "' || t || '" no pudo extender tu reserva: termina a la hora acordada', '#/r/' || p_id);
+  end if;
+end $$;
+
+create or replace function public.mis_patentes() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'patente', patente, 'alias', coalesce(alias, '')) order by creado), '[]')
+  from public.patentes where usuario = auth.uid()
+$$;
+
+create or replace function public.guardar_patente(p_patente text, p_alias text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); v text := public._patente(p_patente);
+begin
+  if v is null then raise exception 'Escribe la patente (ej: ABCD12)'; end if;
+  if not exists (select 1 from public.patentes where usuario = yo.id and patente = v)
+     and (select count(*) from public.patentes where usuario = yo.id) >= 5 then
+    raise exception 'Puedes guardar hasta 5 patentes. Borra una para agregar otra.';
+  end if;
+  insert into public.patentes (usuario, patente, alias) values (yo.id, v, left(nullif(trim(p_alias), ''), 40))
+  on conflict (usuario, patente) do update set alias = excluded.alias;
+  return public.mis_patentes();
+end $$;
+
+create or replace function public.borrar_patente(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.patentes where id = p_id and usuario = auth.uid();
+  return public.mis_patentes();
+end $$;
+
+-- Cambiar la patente de una reserva en curso (llegó en otro auto).
+create or replace function public.patente_arriendo(p_id uuid, p_patente text) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; v text := public._patente(p_patente);
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.estado not in ('pendiente', 'por_pagar', 'en_revision', 'aceptado') then raise exception 'Esta reserva ya terminó'; end if;
+  update public.arriendos set patente = v, actualizado = now() where id = p_id;
+  if v is not null and v is distinct from a.patente and a.estado = 'aceptado' then
+    perform public._notificar(a.dueno, '🚗 Cambió la patente', yo.nombre || ' llegará en el auto ' || v, '#/r/' || p_id);
+  end if;
+end $$;
+
 create or replace function public.mis_arriendos() returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare me uuid := auth.uid();
@@ -1441,6 +1601,9 @@ begin
       'inicio', a.inicio, 'fin', a.fin, 'cantidad', a.cantidad, 'total', a.total, 'monto_pagar', a.monto_pagar,
       'saldo_aplicado', a.saldo_aplicado, 'saldo_monto', a.saldo_monto, 'saldo_hasta', a.saldo_hasta, 'expira_at', a.expira_at,
       'motivo', a.motivo, 'nota', a.nota, 'creado', a.creado, 'soy_dueno', a.dueno = me, 'comprobante', a.comprobante,
+      'patente', a.patente, 'devolver_monto', a.devolver_monto,
+      'ext', case when a.ext_cantidad is not null and a.estado = 'aceptado' then jsonb_build_object('cantidad', a.ext_cantidad, 'monto', a.ext_monto,
+        'comprobante', a.ext_comprobante, 'hasta', a.fin + public._unidad(a.modalidad) * a.ext_cantidad) end,
       'orden', case a.estado when 'en_revision' then 0 when 'por_pagar' then 1 when 'pendiente' then 1 when 'aceptado' then 2 else 3 end,
       'est', jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1], 'direccion', e.direccion,
         'lat', e.lat, 'lng', e.lng, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes),
@@ -1589,7 +1752,7 @@ begin
     'pend_verif', (select count(*) from public.verificaciones where estado = 'pendiente'),
     'pend_denuncias', (select count(*) from public.denuncias where estado = 'abierta'),
     'pend_pagos', (select count(*) from public.pagos where estado = 'pendiente'),
-    'devoluciones', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', e.titulo, 'monto', a.monto_pagar + a.saldo_aplicado,
+    'devoluciones', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', e.titulo, 'monto', coalesce(a.devolver_monto, a.monto_pagar + a.saldo_aplicado),
         'desde', a.devolver_desde, 'dueno', public._pj(a.dueno), 'arrendatario', public._pj(a.arrendatario)) order by a.devolver_desde)
       from public.arriendos a join public.estacionamientos e on e.id = a.estacionamiento
       where a.pago_estado = 'devolver' and a.devolver_desde < now() - make_interval(days => greatest(public._cfg('dias_devolucion'), 1))), '[]'),
@@ -1981,7 +2144,9 @@ grant execute on function
   public.contadores(), public.mis_notificaciones(), public.marcar_leidas(), public.mis_links(), public.guardar_link(int, int, text, text, boolean),
   public.guardar_estacionamiento(jsonb), public.estado_estacionamiento(uuid, text), public.borrar_estacionamiento(uuid),
   public.mis_estacionamientos(), public.favorito(uuid), public.mis_favoritos(),
-  public.solicitar_arriendo(uuid, text, timestamptz, int, text), public.subir_comprobante(uuid, text),
+  public.solicitar_arriendo(uuid, text, timestamptz, int, text, text), public.subir_comprobante(uuid, text),
+  public.pedir_extension(uuid, int, text), public.responder_extension(uuid, boolean), public.mis_patentes(),
+  public.guardar_patente(text, text), public.borrar_patente(uuid), public.patente_arriendo(uuid, text),
   public.responder_arriendo(uuid, boolean, text), public.cerrar_arriendo(uuid, text),
   public.mis_arriendos(), public.panel(), public.mis_estadisticas(), public.calificar(uuid, int, text),
   public.abrir_conversacion(uuid), public.soporte(), public.mis_conversaciones(), public.leer_mensajes(uuid, bigint),

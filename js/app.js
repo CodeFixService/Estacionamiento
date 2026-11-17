@@ -139,11 +139,15 @@
     const ahora = new Date(); ahora.setMinutes(0, 0, 0); ahora.setHours(ahora.getHours() + 1);
     const local = (dt) => { const x = new Date(dt); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16); };
     const mins = (Api._aj.reglas || {}).minutos_pago || 30;
+    // G84: patentes guardadas (si la base aún no se actualiza, se reserva igual sin patente).
+    let pats = null; try { pats = await Api.rpc('mis_patentes'); } catch (e) { pats = null; }
     const c = modal('<h2>📅 Reservar</h2><p class="muted small">' + esc(d.titulo) + '</p>' +
       '<label>¿Cómo quieres arrendar?</label><div class="seg" id="rMod">' + ops.map((o, i) => '<button type="button" data-m="' + o[0] + '" class="' + (i === 0 ? 'on' : '') + '">' + MODAL[o[0]] + '<br><b>' + clp(o[1]) + '</b></button>').join('') + '</div>' +
       '<div class="grid2"><div><label>Desde</label><input type="datetime-local" id="rIni" value="' + local(ahora) + '" min="' + local(new Date()) + '"></div>' +
       '<div><label id="rCantL">Cantidad</label><input type="number" id="rCant" inputmode="numeric" min="1" value="1"></div></div>' +
       '<div class="card" style="margin-top:12px"><div class="row between"><span>Total</span><b id="rTot" style="font-size:20px"></b></div><div class="small muted" id="rHasta"></div></div>' +
+      (pats ? '<label>Patente del auto (opcional)</label><input id="rPat" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="Ej: ABCD12" value="' + esc(pats[0] ? pats[0].patente : '') + '">' +
+        (pats.length > 1 ? '<div class="row" id="rPats" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + pats.map((x) => '<button type="button" class="btn small sec" data-p="' + esc(x.patente) + '">' + esc(x.patente) + (x.alias ? ' · ' + esc(x.alias) : '') + '</button>').join('') + '</div>' : '') : '') +
       '<label>Mensaje para el dueño (opcional)</label><textarea id="rNota" maxlength="300" placeholder="Ej: auto mediano, llego a las 8:00"></textarea>' +
       '<p class="small muted">⏳ Al reservar, el estacionamiento queda <b>apartado ' + mins + ' minutos</b> para que pagues y subas el comprobante.</p>' +
       '<button class="btn block" id="rOk">Reservar y pagar</button>');
@@ -165,15 +169,18 @@
       mod = ops.find((o) => o[0] === b.dataset.m); calc();
     };
     c.querySelector('#rCant').oninput = calc; c.querySelector('#rIni').oninput = calc; calc();
+    if (c.querySelector('#rPats')) c.querySelector('#rPats').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) c.querySelector('#rPat').value = b.dataset.p; };
     c.querySelector('#rOk').onclick = async (e) => {
       const ini = new Date(c.querySelector('#rIni').value);
       if (isNaN(ini)) { toast('Elige la fecha y hora'); return; }
       e.target.disabled = true;
       try {
-        const id = await Api.rpc('solicitar_arriendo', { p_id: d.id, p_modalidad: mod[0], p_inicio: ini.toISOString(),
-          p_cantidad: Math.max(1, +c.querySelector('#rCant').value || 1), p_nota: c.querySelector('#rNota').value });
+        const arg = { p_id: d.id, p_modalidad: mod[0], p_inicio: ini.toISOString(),
+          p_cantidad: Math.max(1, +c.querySelector('#rCant').value || 1), p_nota: c.querySelector('#rNota').value };
+        if (pats && c.querySelector('#rPat').value.trim()) arg.p_patente = c.querySelector('#rPat').value;
+        const id = await Api.rpc('solicitar_arriendo', arg);
         Api.empujar(); cerrarModal(); toast('¡Reservado! Ahora paga y sube el comprobante'); location.hash = '#/r/' + id; Api.refrescar();
-      } catch (er) { e.target.disabled = false; cerrarModal(); fallo(er); }
+      } catch (er) { e.target.disabled = false; if (/[Pp]atente/.test(er.message || '')) { toast(er.message); return; } cerrarModal(); fallo(er); }
     };
   }
 
@@ -186,6 +193,14 @@
     if (!x) { V.innerHTML = volver() + '<div class="vacio">Reserva no encontrada</div>'; return; }
     const dueno = x.soy_dueno, e = x.est, o = x.otro, r = Api._aj.reglas || {};
     const pagado = x.monto_pagar + x.saldo_aplicado;
+    // G84: más tiempo, terminar antes (devolución de lo no usado) y patente. 'patente' in x = la base ya está actualizada.
+    const g84 = 'patente' in x, UN = { hora: ['hora', 'horas', 24], dia: ['día', 'días', 31], mes: ['mes', 'meses', 12] }[x.modalidad];
+    const sumar = (dt, n) => { const f = new Date(dt); if (x.modalidad === 'hora') f.setHours(f.getHours() + n); else if (x.modalidad === 'dia') f.setDate(f.getDate() + n); else f.setMonth(f.getMonth() + n); return f; };
+    const activa = ['pendiente', 'por_pagar', 'en_revision', 'aceptado'].includes(x.estado);
+    const enCurso = x.estado === 'aceptado' && new Date(x.fin) > Date.now();
+    let libres = 0;
+    if (g84 && enCurso && new Date(x.inicio) <= Date.now() && x.pago_estado === 'pagado' && pagado > 0) while (libres < x.cantidad && sumar(Date.now(), libres + 1) <= new Date(x.fin)) libres++;
+    const devAntes = Math.round(pagado * libres / Math.max(1, x.cantidad));
     const b = [];
     if (!dueno && x.estado === 'por_pagar') {
       b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
@@ -199,19 +214,29 @@
         '<div class="row" style="margin-top:10px"><button class="btn ok grow" id="rAprobar">✅ Aprobar</button><button class="btn bad grow" id="rRechazar">Rechazar</button></div></div>');
     }
     if (dueno && x.estado === 'por_pagar') b.push('<div class="aviso warn" style="margin-top:12px">⏳ Esperando que pague. Se libera sola en <b id="rReloj">' + quedan(x.expira_at) + '</b> min si no sube el comprobante.</div>');
-    if (x.pago_estado === 'devolver') b.push('<div class="aviso bad" style="margin-top:12px">💸 Hay que devolver ' + clp(pagado) + '.' + (dueno ? ' <button class="btn small" id="rDevuelto" style="margin-left:6px">Marcar devuelto</button>' : ' El dueño debe devolvértelo.') + '</div>');
+    if (x.pago_estado === 'devolver') b.push('<div class="aviso bad" style="margin-top:12px">💸 Hay que devolver ' + clp(x.devolver_monto != null ? x.devolver_monto : pagado) + '.' + (dueno ? ' <button class="btn small" id="rDevuelto" style="margin-left:6px">Marcar devuelto</button>' : ' El dueño debe devolvértelo.') + '</div>');
     if (x.pago_estado === 'saldo') b.push('<div class="aviso" style="margin-top:12px">💰 Saldo a favor de ' + clp(x.saldo_monto) + ' con este dueño hasta el ' + fecha(x.saldo_hasta) + '. Se descuenta solo en tu próxima reserva con él.</div>');
     if (x.motivo) b.push('<p class="small"><b>Motivo:</b> ' + esc(x.motivo) + '</p>');
+    if (x.ext) {
+      const mas = '+' + x.ext.cantidad + ' ' + UN[x.ext.cantidad === 1 ? 0 : 1] + ' (hasta ' + esc(fh(x.ext.hasta)) + ') · ' + clp(x.ext.monto) + ' extra';
+      if (dueno) b.push('<div class="card" style="margin-top:12px"><b>⏱️ Te piden más tiempo</b><p class="small" style="margin:6px 0 0">' + mas + '</p>' +
+        (x.ext.comprobante ? '<img class="ver-img" id="rExtImg" alt="Comprobante del extra" style="margin-top:8px">' : '<p class="small muted">Sin comprobante: el extra te lo paga directo.</p>') +
+        '<div class="row" style="margin-top:10px"><button class="btn ok grow" id="rExtSi">✅ Aceptar</button><button class="btn bad grow" id="rExtNo">Rechazar</button></div></div>');
+      else b.push('<div class="aviso" style="margin-top:12px">⏱️ Pediste más tiempo: ' + mas + '. Esperando al dueño. <button class="btn small line" id="rExtQuitar" style="margin-left:6px">Quitar</button></div>');
+    } else if (g84 && !dueno && enCurso && x.cantidad < UN[2]) b.push('<button class="btn sec block" id="rExt" style="margin-top:12px">⏱️ Pedir más tiempo</button>');
     const acc = [];
     if (['pendiente', 'por_pagar', 'en_revision', 'aceptado'].includes(x.estado)) acc.push('<button class="btn line grow" id="rCancelar">Cancelar reserva</button>');
-    if (x.estado === 'aceptado') acc.push('<button class="btn grow" id="rFin">Finalizar</button>');
+    if (x.estado === 'aceptado') acc.push('<button class="btn grow" id="rFin">' + (libres > 0 ? 'Terminar antes' : 'Finalizar') + '</button>');
     if (x.estado === 'finalizado' && !x.calificado) acc.push('<button class="btn gold grow" id="rCalif">⭐ Calificar</button>');
     V.innerHTML = volver('Reservas') +
       '<div class="card"><div class="row">' + imgMini(e.foto, 'thumb sm') + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">📍 ' + esc(e.direccion) + (e.comuna ? ', ' + esc(e.comuna) : '') + '</div></div></div>' +
       '<div class="row" style="margin-top:10px"><a class="btn small sec" href="#/e/' + e.id + '">Ver ficha</a><a class="btn small sec" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + e.lat + ',' + e.lng + '">🧭 Cómo llegar</a></div></div>' +
       '<div class="card"><div class="row between"><b>' + (dueno ? 'Reserva recibida' : 'Tu reserva') + '</b>' + pill(ESTADO_ARR[x.estado] || ['', x.estado]) + '</div>' +
       '<table class="tabla" style="margin-top:8px"><tr><td>Desde</td><td>' + esc(fh(x.inicio)) + '</td></tr><tr><td>Hasta</td><td>' + esc(fh(x.fin)) + '</td></tr>' +
-      '<tr><td>Modalidad</td><td>' + MODAL[x.modalidad] + ' × ' + x.cantidad + '</td></tr><tr><td>Total</td><td><b>' + clp(x.total) + '</b></td></tr>' +
+      '<tr><td>Modalidad</td><td>' + MODAL[x.modalidad] + ' × ' + x.cantidad + '</td></tr>' +
+      (g84 && (x.patente || (!dueno && activa)) ? '<tr><td>Patente</td><td>' + (x.patente ? '<b>' + esc(x.patente) + '</b> ' : '') +
+        (!dueno && activa ? '<button class="btn small line" id="rPatente">' + (x.patente ? 'Cambiar' : 'Agregar') + '</button>' : '') + '</td></tr>' : '') +
+      '<tr><td>Total</td><td><b>' + clp(x.total) + '</b></td></tr>' +
       (x.saldo_aplicado ? '<tr><td>Saldo a favor usado</td><td>−' + clp(x.saldo_aplicado) + '</td></tr>' : '') +
       '<tr><td>' + (x.monto_pagar < x.total - x.saldo_aplicado ? 'Abono para confirmar' : 'A pagar') + '</td><td><b>' + clp(x.monto_pagar) + '</b></td></tr></table>' +
       (x.nota ? '<p class="small" style="background:var(--card2);padding:8px 10px;border-radius:10px">“' + esc(x.nota) + '”</p>' : '') + b.join('') + '</div>' +
@@ -242,7 +267,35 @@
       if (m != null) hacer(() => Api.rpc('responder_arriendo', { p_id: id, p_aceptar: false, p_motivo: m }), 'Reserva rechazada');
     };
     if ($('rDevuelto')) $('rDevuelto').onclick = () => hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'devuelto' }), 'Marcado como devuelto');
-    if ($('rFin')) $('rFin').onclick = async () => { if (await confirmar('¿Marcar este arriendo como finalizado?', 'Finalizar')) hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'finalizar' }), 'Finalizado. ¡Califica! ⭐'); };
+    if ($('rExtImg')) U.urlPrivada(x.ext.comprobante).then((u) => { $('rExtImg').src = u; $('rExtImg').onclick = () => window.open(u, '_blank'); });
+    if ($('rExtSi')) $('rExtSi').onclick = () => hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: true }), 'Listo: tiene más tiempo ✅');
+    if ($('rExtNo')) $('rExtNo').onclick = async () => { if (await confirmar('¿Rechazar el tiempo extra? La reserva termina a la hora acordada.', 'Rechazar', true)) hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: false }), 'Rechazado'); };
+    if ($('rExtQuitar')) $('rExtQuitar').onclick = () => hacer(() => Api.rpc('pedir_extension', { p_id: id, p_cantidad: 0, p_ruta: null }), 'Solicitud quitada');
+    if ($('rExt')) $('rExt').onclick = () => {
+      const max = UN[2] - x.cantidad, precio = Math.round(x.total / Math.max(1, x.cantidad));
+      const c = modal('<h2>⏱️ Más tiempo</h2><p class="muted small">Hoy termina: ' + esc(fh(x.fin)) + ' · El dueño debe aceptar.</p>' +
+        '<label>¿Cuántas ' + UN[1] + ' más? (máx. ' + max + ')</label><input type="number" id="xCant" inputmode="numeric" min="1" max="' + max + '" value="1">' +
+        '<div class="card" style="margin-top:12px"><div class="row between"><span>Extra</span><b id="xTot" style="font-size:20px"></b></div><div class="small muted" id="xHasta"></div></div>' +
+        '<label>Comprobante del pago extra (opcional)</label><input type="file" id="xComp" accept="image/*">' +
+        '<p class="small muted">Sin comprobante, el extra se lo pagas directo al dueño.</p><button class="btn block" id="xOk">Pedir más tiempo</button>');
+      const n = () => Math.max(1, Math.min(max, +c.querySelector('#xCant').value || 1));
+      const calc = () => { c.querySelector('#xTot').textContent = clp(precio * n()); c.querySelector('#xHasta').textContent = 'Hasta ' + fh(sumar(x.fin, n())); };
+      c.querySelector('#xCant').oninput = calc; calc();
+      c.querySelector('#xOk').onclick = async (ev) => {
+        ev.target.disabled = true;
+        try {
+          const f = c.querySelector('#xComp').files[0];
+          const ruta = f ? await U.subirFoto(f, 'privado', U.FOTO('comprobante')) : null;
+          await Api.rpc('pedir_extension', { p_id: id, p_cantidad: n(), p_ruta: ruta });
+          cerrarModal(); toast('Pedido enviado al dueño ⏱️'); recargar();
+        } catch (er) { ev.target.disabled = false; cerrarModal(); fallo(er); }
+      };
+    };
+    if ($('rPatente')) $('rPatente').onclick = async () => {
+      const v = await U.pedirTexto('Patente del auto', 'Ej: ABCD12', 'Guardar', x.patente || '');
+      if (v != null) hacer(() => Api.rpc('patente_arriendo', { p_id: id, p_patente: v }), 'Patente guardada');
+    };
+    if ($('rFin')) $('rFin').onclick = async () => { if (await confirmar(libres > 0 ? '¿Terminar ahora? Quedan ' + libres + ' ' + UN[libres === 1 ? 0 : 1] + ' sin usar: ' + (dueno ? 'deberás devolver ' : 'el dueño te devuelve ') + clp(devAntes) + '.' : '¿Marcar este arriendo como finalizado?', libres > 0 ? 'Terminar antes' : 'Finalizar')) hacer(() => Api.rpc('cerrar_arriendo', { p_id: id, p_accion: 'finalizar' }), 'Finalizado. ¡Califica! ⭐'); };
     if ($('rCalif')) $('rCalif').onclick = () => calificar(id, o.nombre, () => vReserva(id));
     if ($('rCancelar')) $('rCancelar').onclick = async () => {
       let txt = '¿Cancelar esta reserva?';
@@ -486,6 +539,7 @@
         !adm && { k: 'links', ico: '💳', t: 'Links de pago', grupo: g, abrir: en(vLinks) },
         !adm && { k: 'favoritos', ico: '❤️', t: 'Favoritos', grupo: g, abrir: en(vFavoritos) },
         !adm && { k: 'estadisticas', ico: '📊', t: 'Estadísticas', grupo: g, abrir: en(vEstadisticas) },
+        !adm && { k: 'patentes', ico: '🔢', t: 'Mis patentes', d: 'Los autos con los que reservas', grupo: 'Tus autos', abrir: en(vPatentes) },
         !adm && { k: 'premium', ico: '⭐', t: 'Mi plan', dato: Api.cuenta.premium ? (Api.cuenta.plan_origen === 'prueba' ? 'Prueba' : 'Premium') : 'Free', grupo: 'Tu plan', abrir: en(vPremium) },
         { k: 'cuenta', ico: 'cuenta', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
       ]);
@@ -509,6 +563,28 @@
     T.onchange = async (ev) => {
       const s = ev.target.closest('[data-est]'); if (!s) return;
       try { await Api.rpc('estado_estacionamiento', { p_id: s.dataset.est, p_estado: s.value }); toast('Estado actualizado'); g.Mapa.recargar(); } catch (er) { fallo(er); }
+    };
+  }
+
+  // G84: patentes de mis autos (hasta 5). Se eligen al reservar y el dueño ve cuál llega.
+  async function vPatentes(T, lista) {
+    const r = lista || await Api.rpc('mis_patentes');
+    T.innerHTML = '<p class="muted small">Guarda las patentes de tus autos: al reservar eliges una y el dueño sabe qué auto llega. ' + r.length + ' de 5.</p>' +
+      (r.length ? r.map((p) => '<div class="item"><div class="grow"><b>' + esc(p.patente) + '</b>' + (p.alias ? '<div class="small muted">' + esc(p.alias) + '</div>' : '') + '</div>' +
+          '<button class="btn small line" data-borrar="' + p.id + '">Borrar</button></div>').join('')
+        : '<div class="vacio">' + ico('car') + '<p>Aún no guardas patentes.</p></div>') +
+      (r.length < 5 ? '<div class="card" style="margin-top:12px"><b>Agregar patente</b><label>Patente</label><input class="ptPat" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="Ej: ABCD12">' +
+        '<label>Nombre del auto (opcional)</label><input class="ptAlias" maxlength="40" placeholder="Ej: Auto de la casa">' +
+        '<button class="btn block ptOk" style="margin-top:10px">Guardar patente</button></div>' : '');
+    U.ponerIconos(T);
+    T.onclick = async (ev) => {
+      const b = ev.target.closest('[data-borrar]');
+      try {
+        if (b) { if (await confirmar('¿Borrar esta patente?', 'Borrar', true)) { vPatentes(T, await Api.rpc('borrar_patente', { p_id: b.dataset.borrar })); toast('Patente borrada'); } return; }
+        if (!ev.target.closest('.ptOk')) return;
+        if (!T.querySelector('.ptPat').value.trim()) { toast('Escribe la patente'); return; }
+        vPatentes(T, await Api.rpc('guardar_patente', { p_patente: T.querySelector('.ptPat').value, p_alias: T.querySelector('.ptAlias').value })); toast('Patente guardada 🚗');
+      } catch (e) { fallo(e); }
     };
   }
 
