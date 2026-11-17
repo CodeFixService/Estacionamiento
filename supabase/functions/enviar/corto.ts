@@ -1,2 +1,2 @@
-// Estaciona · función "enviar" v1.2 en una línea (carga index.ts de un commit fijo de GitHub).
-import 'https://raw.githubusercontent.com/CodeFixService/Estacionamiento/62d16a74dd765c9ffb67864b9039907f689b41fc/supabase/functions/enviar/index.ts';
+// Estaciona · función "enviar" v1.3 en una línea (carga index.ts de un commit fijo de GitHub).
+import 'https://raw.githubusercontent.com/CodeFixService/Estacionamiento/32a7c16b48c09e7be57f7a6459d515e7f94c1a1f/supabase/functions/enviar/index.ts';
