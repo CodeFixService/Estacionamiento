@@ -203,6 +203,9 @@ create table if not exists public.por_borrar (
 -- Todo se lee y escribe por funciones (RPC): sin políticas, nadie accede directo a las tablas.
 alter table public.perfiles enable row level security;
 alter table public.verificaciones enable row level security;
+-- G84 c: filtros 📹 cámara y 🚪 portón automático.
+alter table public.estacionamientos add column if not exists camara boolean not null default false,
+  add column if not exists porton boolean not null default false;
 alter table public.estacionamientos enable row level security;
 alter table public.arriendos enable row level security;
 alter table public.calificaciones enable row level security;
@@ -510,10 +513,11 @@ begin
       raise exception 'Demasiadas publicaciones hoy';
     end if;
     insert into public.estacionamientos (dueno, titulo, descripcion, direccion, comuna, lat, lng, precio_hora, precio_dia, precio_mes,
-      vehiculo, techado, acceso24, seguridad, carga, fotos)
+      vehiculo, techado, acceso24, seguridad, carga, camara, porton, fotos)
     values (yo.id, left(trim(p ->> 'titulo'), 60), left(p ->> 'descripcion', 600), left(trim(p ->> 'direccion'), 140), left(p ->> 'comuna', 40),
       v_lat, v_lng, ph, pd, pm, coalesce(p ->> 'vehiculo', 'auto'), coalesce((p ->> 'techado')::boolean, false),
-      coalesce((p ->> 'acceso24')::boolean, false), coalesce((p ->> 'seguridad')::boolean, false), coalesce((p ->> 'carga')::boolean, false), v_fotos)
+      coalesce((p ->> 'acceso24')::boolean, false), coalesce((p ->> 'seguridad')::boolean, false), coalesce((p ->> 'carga')::boolean, false),
+      coalesce((p ->> 'camara')::boolean, false), coalesce((p ->> 'porton')::boolean, false), v_fotos)
     returning id into eid;
   else
     select * into e from public.estacionamientos where id = eid for update;
@@ -522,7 +526,9 @@ begin
       direccion = left(trim(p ->> 'direccion'), 140), comuna = left(p ->> 'comuna', 40), lat = v_lat, lng = v_lng,
       precio_hora = ph, precio_dia = pd, precio_mes = pm, vehiculo = coalesce(p ->> 'vehiculo', 'auto'),
       techado = coalesce((p ->> 'techado')::boolean, false), acceso24 = coalesce((p ->> 'acceso24')::boolean, false),
-      seguridad = coalesce((p ->> 'seguridad')::boolean, false), carga = coalesce((p ->> 'carga')::boolean, false), fotos = v_fotos
+      seguridad = coalesce((p ->> 'seguridad')::boolean, false), carga = coalesce((p ->> 'carga')::boolean, false),
+      -- la app antigua no manda estos dos: se conservan
+      camara = coalesce((p ->> 'camara')::boolean, camara), porton = coalesce((p ->> 'porton')::boolean, porton), fotos = v_fotos
     where id = eid;
   end if;
   return eid;
@@ -891,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '43') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '44') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1084,9 +1090,11 @@ language sql stable security definer set search_path = public as $$
   left join lateral (select * from public.links_pago where dueno is null and tipo = 'premium_anual' and activo order by slot limit 1) la on true
 $$;
 
+-- G84 c: suma cam/pt al final (cambia el tipo de retorno → se borra y se crea de nuevo; los permisos se dan más abajo).
+drop function if exists public.mapa(double precision, double precision, double precision, double precision);
 create or replace function public.mapa(p_s double precision, p_w double precision, p_n double precision, p_e double precision)
 returns table (id uuid, la double precision, lo double precision, ph int, pd int, pm int, v text,
-  t boolean, h boolean, sg boolean, cg boolean, c text, f text, d boolean)
+  t boolean, h boolean, sg boolean, cg boolean, c text, f text, d boolean, cam boolean, pt boolean)
 language sql stable security definer set search_path = public as $$
   with vis as (
     select e.*, public._puede(p, 'destacado') as dest, public._lim(p, 'publicar') as lim,
@@ -1095,7 +1103,7 @@ language sql stable security definer set search_path = public as $$
     where e.estado = 'disponible' and not p.suspendido and (p.verificado or p.es_admin)
   )
   select vis.id, vis.lat, vis.lng, vis.precio_hora, vis.precio_dia, vis.precio_mes, vis.vehiculo,
-    vis.techado, vis.acceso24, vis.seguridad, vis.carga, vis.comuna, vis.fotos[1], vis.dest
+    vis.techado, vis.acceso24, vis.seguridad, vis.carga, vis.comuna, vis.fotos[1], vis.dest, vis.camara, vis.porton
   from vis
   where vis.n <= vis.lim and vis.lat between p_s and p_n and vis.lng between p_w and p_e
   order by vis.dest desc, vis.creado desc
@@ -1124,7 +1132,7 @@ begin
   return jsonb_build_object('id', e.id, 'titulo', e.titulo, 'descripcion', e.descripcion, 'comuna', e.comuna,
     'lat', e.lat, 'lng', e.lng, 'exacta', true, 'direccion', e.direccion,
     'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'vehiculo', e.vehiculo, 'techado', e.techado,
-    'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
+    'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'camara', e.camara, 'porton', e.porton, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
     'visible', coalesce(visible, false), 'reservable', public._reservable(e), 'creado', e.creado, 'mio', e.dueno = me, 'logueado', me is not null,
     'vistas', case when e.dueno = me or coalesce(yo.es_admin, false) then e.vistas end,
     'favorito', me is not null and exists (select 1 from public.favoritos f where f.usuario = me and f.estacionamiento = p_id),
@@ -2072,7 +2080,8 @@ begin
   if u is null then raise exception 'Inicia sesión'; end if;
   return jsonb_build_object(
     'Mis estacionamientos', (select coalesce(jsonb_agg(x order by x.creado), '[]') from (select titulo, direccion, comuna, precio_hora, precio_dia, precio_mes, vehiculo,
-        techado, acceso24, seguridad, carga, estado, vistas, creado from public.estacionamientos where dueno = u) x),
+        techado, acceso24, seguridad, carga, camara, porton, estado, vistas, creado from public.estacionamientos where dueno = u) x),
+    'Mis patentes', (select coalesce(jsonb_agg(jsonb_build_object('patente', pt.patente, 'alias', pt.alias)), '[]') from public.patentes pt where pt.usuario = u),
     'Arriendos', (select coalesce(jsonb_agg((to_jsonb(a) - 'comprobante' - 'id' - 'estacionamiento' - 'dueno' - 'arrendatario')
         || jsonb_build_object('estacionamiento', e.titulo, 'yo_soy', case when a.dueno = u then 'dueño' else 'arrendatario' end,
            'otra_persona', (select nombre from public.perfiles where id = case when a.dueno = u then a.arrendatario else a.dueno end)) order by a.creado), '[]')

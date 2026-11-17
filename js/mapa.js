@@ -4,7 +4,7 @@
   const { $, esc, corto, clp, ico, imgMini, toast, modal, cerrarModal } = g.U;
   const cfg = g.EST_CONFIG;
   let mapa, capa, grupo, datos = [], cargado = null, ultimaCarga = 0, yoMarca = null, iniciado = false;
-  const F = { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false };
+  const F = { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false, camara: false, porton: false };
   try { Object.assign(F, JSON.parse(localStorage.getItem('est:filtros')) || {}); } catch (e) { /* nada */ }
 
   /* ---------- Estilo del mapa: blanco, calles negras, sin relieve ni áreas de color ----------
@@ -95,6 +95,7 @@
     if (F.modalidad === 'hora') return d.ph; if (F.modalidad === 'dia') return d.pd; if (F.modalidad === 'mes') return d.pm;
     return d.pm || d.pd || d.ph;
   }
+  const g84c = () => !datos.length || 'cam' in datos[0];
   function pasa(d) {
     if (F.modalidad === 'hora' && !d.ph) return false;
     if (F.modalidad === 'dia' && !d.pd) return false;
@@ -106,9 +107,12 @@
     if (F.acceso24 && !d.h) return false;
     if (F.seguridad && !d.sg) return false;
     if (F.carga && !d.cg) return false;
+    // G84 c: cámara y portón (solo si la base ya los trae)
+    if (F.camara && g84c() && !d.cam) return false;
+    if (F.porton && g84c() && !d.pt) return false;
     return true;
   }
-  const caracs = (d) => [d.t && '🏠 Techado', d.h && '🕐 24 h', d.sg && '🛡️ Seguridad', d.cg && '⚡ Carga', d.v === 'moto' ? '🏍️ Moto' : d.v === 'camioneta' ? '🛻 Camioneta' : '🚗 Auto'].filter(Boolean);
+  const caracs = (d) => [d.t && '🏠 Techado', d.h && '🕐 24 h', d.sg && '🛡️ Seguridad', d.cam && '📹 Cámara', d.pt && '🚪 Portón', d.cg && '⚡ Carga', d.v === 'moto' ? '🏍️ Moto' : d.v === 'camioneta' ? '🛻 Camioneta' : '🚗 Auto'].filter(Boolean);
 
   function popup(d) {
     return '<div class="pop">' + (d.f ? imgMini(d.f, '') : '') + '<div class="pop-c"><div class="pop-precio">' + esc(etiqueta(d)) + (d.d ? ' <span class="pill gold">PRO</span>' : '') + '</div>' +
@@ -130,7 +134,7 @@
     });
     $('mapaInfo').textContent = datos.length ? vis.length + ' disponible' + (vis.length === 1 ? '' : 's') + ' aquí' : '';
     if (!$('hojaLista').hidden) lista();
-    const n = ['modalidad', 'max', 'vehiculo', 'techado', 'acceso24', 'seguridad', 'carga'].filter((k) => F[k]).length;
+    const n = ['modalidad', 'max', 'vehiculo', 'techado', 'acceso24', 'seguridad', 'carga', 'camara', 'porton'].filter((k) => F[k]).length;
     $('bFiltros').classList.toggle('on', n > 0);
     chips();
   }
@@ -163,7 +167,7 @@
   function guardarF() { try { localStorage.setItem('est:filtros', JSON.stringify(F)); } catch (e) { /* nada */ } }
   function chips() {
     const op = [['modalidad', 'hora', 'Por hora'], ['modalidad', 'dia', 'Por día'], ['modalidad', 'mes', 'Mensual'],
-      ['techado', true, '🏠 Techado'], ['acceso24', true, '🕐 24 h'], ['seguridad', true, '🛡️ Seguridad'], ['carga', true, '⚡ Carga']];
+      ['techado', true, '🏠 Techado'], ['acceso24', true, '🕐 24 h'], ['seguridad', true, '🛡️ Seguridad']].concat(g84c() ? [['camara', true, '📹 Cámara'], ['porton', true, '🚪 Portón']] : [], [['carga', true, '⚡ Carga']]);
     $('chipsFiltro').innerHTML = op.map((o, i) => '<button type="button" data-k="' + i + '" class="' + (F[o[0]] === o[1] ? 'on' : '') + '">' + o[2] + '</button>').join('');
     $('chipsFiltro').onclick = (e) => {
       const b = e.target.closest('button'); if (!b) return;
@@ -178,14 +182,16 @@
       '<label>Precio máximo</label><input id="fMax" type="number" inputmode="numeric" min="0" step="1000" placeholder="Sin límite">' +
       '<label>Vehículo</label><select id="fVeh"><option value="">Cualquiera</option><option value="moto">Moto</option><option value="auto">Auto</option><option value="camioneta">Camioneta / SUV grande</option></select>' +
       '<label class="check"><input type="checkbox" id="fT"> Techado</label><label class="check"><input type="checkbox" id="fH"> Acceso 24 horas</label>' +
-      '<label class="check"><input type="checkbox" id="fS"> Con seguridad / conserjería</label><label class="check"><input type="checkbox" id="fC"> Carga para auto eléctrico</label>' +
+      '<label class="check"><input type="checkbox" id="fS"> Con seguridad / conserjería</label>' + (g84c() ? '<label class="check"><input type="checkbox" id="fCam"> Con cámara</label><label class="check"><input type="checkbox" id="fPt"> Portón automático</label>' : '') + '<label class="check"><input type="checkbox" id="fC"> Carga para auto eléctrico</label>' +
       '<div class="row" style="margin-top:14px"><button class="btn sec grow" id="fLimpiar">Limpiar</button><button class="btn grow" id="fOk">Ver resultados</button></div>');
     c.querySelector('#fMod').value = F.modalidad; c.querySelector('#fMax').value = F.max || ''; c.querySelector('#fVeh').value = F.vehiculo;
     c.querySelector('#fT').checked = F.techado; c.querySelector('#fH').checked = F.acceso24; c.querySelector('#fS').checked = F.seguridad; c.querySelector('#fC').checked = F.carga;
-    c.querySelector('#fLimpiar').onclick = () => { Object.assign(F, { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false }); guardarF(); pintar(); cerrarModal(); };
+    if (c.querySelector('#fCam')) { c.querySelector('#fCam').checked = F.camara; c.querySelector('#fPt').checked = F.porton; }
+    c.querySelector('#fLimpiar').onclick = () => { Object.assign(F, { modalidad: '', max: 0, vehiculo: '', techado: false, acceso24: false, seguridad: false, carga: false, camara: false, porton: false }); guardarF(); pintar(); cerrarModal(); };
     c.querySelector('#fOk').onclick = () => {
       Object.assign(F, { modalidad: c.querySelector('#fMod').value, max: +c.querySelector('#fMax').value || 0, vehiculo: c.querySelector('#fVeh').value,
-        techado: c.querySelector('#fT').checked, acceso24: c.querySelector('#fH').checked, seguridad: c.querySelector('#fS').checked, carga: c.querySelector('#fC').checked });
+        techado: c.querySelector('#fT').checked, acceso24: c.querySelector('#fH').checked, seguridad: c.querySelector('#fS').checked, carga: c.querySelector('#fC').checked,
+        camara: !!(c.querySelector('#fCam') && c.querySelector('#fCam').checked), porton: !!(c.querySelector('#fPt') && c.querySelector('#fPt').checked) });
       guardarF(); pintar(); cerrarModal();
     };
   }

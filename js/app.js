@@ -93,7 +93,7 @@
     V.innerHTML = volver('Mapa') + '<div class="galeria">' + (fotos || '<img alt="">') + '</div>' +
       '<div class="row between" style="margin-top:14px"><h1 class="grow">' + esc(d.titulo) + '</h1>' + (d.estado !== 'disponible' ? pill(est) : '') + '</div>' +
       '<div class="precios">' + precios + '</div>' +
-      '<div class="carac">' + g.Mapa.caracs({ t: d.techado, h: d.acceso24, sg: d.seguridad, cg: d.carga, v: d.vehiculo }).map((x) => '<span class="pill">' + esc(x) + '</span>').join('') + '</div>' +
+      '<div class="carac">' + g.Mapa.caracs({ t: d.techado, h: d.acceso24, sg: d.seguridad, cg: d.carga, cam: d.camara, pt: d.porton, v: d.vehiculo }).map((x) => '<span class="pill">' + esc(x) + '</span>').join('') + '</div>' +
       (d.descripcion ? '<p style="margin-top:12px;white-space:pre-line">' + esc(d.descripcion) + '</p>' : '') +
       (d.mio && !d.visible ? '<div class="aviso warn" style="margin-top:12px">⚠️ Este estacionamiento <b>no se ve en el mapa</b> porque superas el límite de tu plan. <a href="#/premium">Hazte Premium</a>.</div>' : '') +
       '<div class="sec-tit">Ubicación exacta</div><div class="card"><b>📍 ' + esc(d.direccion) + '</b>' + (d.comuna ? '<div class="small muted">' + esc(d.comuna) + '</div>' : '') +
@@ -450,7 +450,7 @@
       '<div><label>Mensual</label><input id="pPm" type="number" inputmode="numeric" min="0" step="1000" value="' + (e.pm || '') + '"></div></div>' +
       '<div class="sec-tit">Características</div><label>Vehículo máximo</label><select id="pVeh"><option value="moto">Moto</option><option value="auto">Auto</option><option value="camioneta">Camioneta / SUV grande</option></select>' +
       '<label class="check"><input type="checkbox" id="pT"' + (e.techado ? ' checked' : '') + '> 🏠 Techado</label><label class="check"><input type="checkbox" id="pH"' + (e.acceso24 ? ' checked' : '') + '> 🕐 Acceso 24 horas</label>' +
-      '<label class="check"><input type="checkbox" id="pS"' + (e.seguridad ? ' checked' : '') + '> 🛡️ Seguridad / conserjería</label><label class="check"><input type="checkbox" id="pC"' + (e.carga ? ' checked' : '') + '> ⚡ Carga para auto eléctrico</label>' +
+      '<label class="check"><input type="checkbox" id="pS"' + (e.seguridad ? ' checked' : '') + '> 🛡️ Seguridad / conserjería</label>' + (!id || 'camara' in e ? '<label class="check"><input type="checkbox" id="pCam"' + (e.camara ? ' checked' : '') + '> 📹 Cámara</label><label class="check"><input type="checkbox" id="pPt"' + (e.porton ? ' checked' : '') + '> 🚪 Portón automático</label>' : '') + '<label class="check"><input type="checkbox" id="pC"' + (e.carga ? ' checked' : '') + '> ⚡ Carga para auto eléctrico</label>' +
       (id ? '' : '<label class="check"><input type="checkbox" id="pDecl" required> <span class="small">Declaro que el estacionamiento es mío o tengo autorización para arrendarlo, y que la información es verdadera.</span></label>') +
       '<button class="btn block" id="pOk" style="margin-top:16px">' + (id ? 'Guardar cambios' : 'Publicar') + '</button>' +
       (id ? '<button type="button" class="btn line block" id="pDel" style="margin-top:8px;color:var(--bad)">' + ico('trash') + ' Eliminar estacionamiento</button>' : '') + '</form>';
@@ -512,7 +512,7 @@
         const nid = await Api.rpc('guardar_estacionamiento', { p: {
           id: id || null, titulo: $('pTit').value, descripcion: $('pDesc').value, direccion: $('pDir').value, comuna: $('pCom').value,
           lat: st.lat, lng: st.lng, precio_hora: +$('pPh').value || 0, precio_dia: +$('pPd').value || 0, precio_mes: +$('pPm').value || 0,
-          vehiculo: $('pVeh').value, techado: $('pT').checked, acceso24: $('pH').checked, seguridad: $('pS').checked, carga: $('pC').checked, fotos: rutas
+          vehiculo: $('pVeh').value, techado: $('pT').checked, acceso24: $('pH').checked, seguridad: $('pS').checked, carga: $('pC').checked, camara: $('pCam') ? $('pCam').checked : null, porton: $('pPt') ? $('pPt').checked : null, fotos: rutas
         } });
         Api.empujar(); await Api.refrescar(); g.Mapa.recargar();
         toast(id ? 'Cambios guardados' : '¡Publicado! Ya aparece en el mapa 🎉');
