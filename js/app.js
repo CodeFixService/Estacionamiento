@@ -145,7 +145,8 @@
       '<label>¿Cómo quieres arrendar?</label><div class="seg" id="rMod">' + ops.map((o, i) => '<button type="button" data-m="' + o[0] + '" class="' + (i === 0 ? 'on' : '') + '">' + MODAL[o[0]] + '<br><b>' + clp(o[1]) + '</b></button>').join('') + '</div>' +
       '<div class="grid2"><div><label>Desde</label><input type="datetime-local" id="rIni" value="' + local(ahora) + '" min="' + local(new Date()) + '"></div>' +
       '<div><label id="rCantL">Cantidad</label><input type="number" id="rCant" inputmode="numeric" min="1" value="1"></div></div>' +
-      '<div class="card" style="margin-top:12px"><div class="row between"><span>Total</span><b id="rTot" style="font-size:20px"></b></div><div class="small muted" id="rHasta"></div></div>' +
+      '<div class="card" style="margin-top:12px"><div class="row between"><span>Total</span><b id="rTot" style="font-size:20px"></b></div><div class="small muted" id="rHasta"></div>' +
+      (d.desc ? '<div class="small" id="rDesc">🏷️ ' + d.desc.pct + ' % menos reservando ' + d.desc.desde + ' o más</div>' : '') + '</div>' +
       (pats ? '<label>Patente del auto (opcional)</label><input id="rPat" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="Ej: ABCD12" value="' + esc(pats[0] ? pats[0].patente : '') + '">' +
         (pats.length > 1 ? '<div class="row" id="rPats" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + pats.map((x) => '<button type="button" class="btn small sec" data-p="' + esc(x.patente) + '">' + esc(x.patente) + (x.alias ? ' · ' + esc(x.alias) : '') + '</button>').join('') + '</div>' : '') : '') +
       '<label>Mensaje para el dueño (opcional)</label><textarea id="rNota" maxlength="300" placeholder="Ej: auto mediano, llego a las 8:00"></textarea>' +
@@ -155,7 +156,9 @@
     const calc = () => {
       const n = Math.max(1, Math.min(mod[3], +c.querySelector('#rCant').value || 1));
       c.querySelector('#rCantL').textContent = 'Cantidad de ' + mod[2] + ' (máx. ' + mod[3] + ')';
-      c.querySelector('#rTot').textContent = clp(mod[1] * n);
+      // G94 🏷️ descuento por estadía larga (el servidor lo aplica igual)
+      const ds = d.desc && n >= d.desc.desde ? d.desc.pct : 0;
+      c.querySelector('#rTot').textContent = clp(Math.round(mod[1] * n * (100 - ds) / 100)) + (ds ? ' (−' + ds + ' %)' : '');
       const ini = new Date(c.querySelector('#rIni').value);
       if (!isNaN(ini)) {
         const fin = new Date(ini);
@@ -260,6 +263,14 @@
     const recargar = () => { Api.empujar(); contadores(); vReserva(id); };
     const hacer = async (fn, msg) => { try { await fn(); if (msg) toast(msg); recargar(); } catch (er) { fallo(er); } };
     $('rChat').onclick = () => contactar(o.id);
+    // G94 🔑 pase QR (solo si el dueño usa Control de acceso y la reserva está aceptada)
+    if (x.estado === 'aceptado' && new Date(x.fin) > Date.now()) Api.rpc('pase_arriendo', { p_id: id }).then((cod) => {
+      if (!cod || !$('rChat') || $('rPase')) return;
+      const b = document.createElement('button'); b.className = 'btn gold block'; b.id = 'rPase'; b.style.marginTop = '10px'; b.textContent = dueno ? '🔑 Pase: ' + cod : '🔑 Mi pase para entrar';
+      b.onclick = () => { const m = modal('<h2>🔑 Pase de entrada</h2><p class="muted small">Muéstralo al llegar.</p><div id="paseQR" style="display:flex;justify-content:center"></div><p style="text-align:center;font-size:28px;letter-spacing:4px;font-weight:700" id="paseCod">' + esc(cod) + '</p><button class="btn block" id="paseCerrar">Cerrar</button>'); m.querySelector('#paseCerrar').onclick = cerrarModal;
+        const cv = U.qrCanvas(cod, '#000', 480); cv.style.width = '220px'; cv.style.height = '220px'; m.querySelector('#paseQR').appendChild(cv); };
+      $('rChat').closest('.card').appendChild(b);
+    }).catch(() => {});
     if ($('rReloj')) pollChat = setInterval(() => {
       if (!$('rReloj')) return;
       $('rReloj').textContent = quedan(x.expira_at);
@@ -556,6 +567,10 @@
         !adm && { k: 'links', ico: '💳', t: 'Links de pago', grupo: g, abrir: en(vLinks) },
         !adm && { k: 'favoritos', ico: '❤️', t: 'Favoritos', grupo: g, abrir: en(vFavoritos) },
         !adm && { k: 'estadisticas', ico: '📊', t: 'Estadísticas', grupo: g, abrir: en(vEstadisticas) },
+        !adm && { k: 'modulos', ico: '🧩', t: 'Módulos', d: 'Destacado, acceso QR, descuentos y ganancias', grupo: g, abrir: en(vModulos) },
+        !adm && { k: 'acceso', ico: '🔑', t: 'Control de acceso', d: 'Valida el pase QR de cada reserva', grupo: g, abrir: en(vAcceso) },
+        !adm && { k: 'descuentos', ico: '🏷️', t: 'Descuento por estadía larga', grupo: g, abrir: en(vDescuentos) },
+        !adm && { k: 'ganancias', ico: '💰', t: 'Ganancias y ocupación', grupo: g, abrir: en(vGanancias) },
         !adm && { k: 'patentes', ico: '🔢', t: 'Mis patentes', d: 'Los autos con los que reservas', grupo: 'Tus autos', abrir: en(vPatentes) },
         !adm && { k: 'premium', ico: '⭐', t: 'Mi plan', dato: Api.cuenta.premium ? (Api.cuenta.plan_origen === 'prueba' ? 'Prueba' : 'Premium') : 'Free', grupo: 'Tu plan', abrir: en(vPremium) },
         { k: 'cuenta', ico: 'cuenta', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
@@ -584,6 +599,68 @@
   }
 
   // G84: patentes de mis autos (hasta 5). Se eligen al reservar y el dueño ve cuál llega.
+  /* ---------- G94 · 🧩 Módulos ---------- */
+  let MODS = null;
+  const mods = async (forzar) => { if (!MODS || forzar) MODS = await Api.rpc('mis_modulos').catch(() => ({})) || {}; return MODS; };
+  const verModulo = (k) => window.CFX_MODULOS_TIENDA && CFX_MODULOS_TIENDA.probar(k, { rpc: (f, x) => Api.rpc(f, x), alCambiar: () => setTimeout(() => location.reload(), 1500) });
+  const sinMod = (T, k, txt) => { T.innerHTML = '<p class="muted small">' + esc(txt) + '</p><div class="aviso">🧩 Este módulo aún no está activo.</div><button class="btn block" id="mVer" style="margin-top:10px">🧩 Ver el módulo</button>'; T.querySelector('#mVer').onclick = () => verModulo(k); };
+  function vModulos(T) {
+    T.innerHTML = '<p class="muted small">Suma solo lo que te sirve. Con Premium pagas menos.</p><div id="modZona"></div>';
+    if (window.CFX_MODULOS_TIENDA) CFX_MODULOS_TIENDA.montar(T.querySelector('#modZona'), { rpc: (f, x) => Api.rpc(f, x), alCambiar: () => setTimeout(() => location.reload(), 1500) }).cargar();
+  }
+  // 🔑 Control de acceso: escribe o escanea el pase → ✅ vigente / ⛔ → anota entrada o salida.
+  async function vAcceso(T) {
+    if (!(await mods()).acceso) return sinMod(T, 'acceso', 'Cada reserva aceptada trae su pase QR. Lo validas al entrar y salir.');
+    T.innerHTML = '<p class="muted small">Pídele su pase (Reservas → la reserva → 🔑 Mi pase) y escribe el código o escanéalo.</p>' +
+      '<div class="row"><input id="acCod" maxlength="8" autocapitalize="characters" autocomplete="off" placeholder="Código del pase" style="text-transform:uppercase"><button class="btn" id="acVer">Ver</button></div>' +
+      ('BarcodeDetector' in window ? '<button class="btn sec block" id="acScan" style="margin-top:8px">📷 Escanear QR</button><video id="acVid" playsinline muted style="display:none;width:100%;border-radius:12px;margin-top:8px"></video>' : '') +
+      '<div id="acRes"></div>';
+    const ver = async (marcar) => {
+      const cod = $('acCod').value.trim().toUpperCase(); if (cod.length < 6) { toast('Escribe el código del pase'); return; }
+      try {
+        const r = await Api.rpc('acceso_validar', { p_pase: cod, p_marcar: marcar || '' });
+        $('acRes').innerHTML = '<div class="card" style="margin-top:12px;border:2px solid ' + (r.vigente ? 'var(--ok,#16a34a)' : 'var(--bad,#dc2626)') + '"><h3 style="margin:0">' + (r.vigente ? '✅ VIGENTE' : '⛔ NO VIGENTE') + '</h3>' +
+          '<p>' + esc(r.lugar) + '<br>' + esc(r.quien || '') + (r.patente ? ' · 🚗 <b>' + esc(r.patente) + '</b>' : '') + '<br><span class="small muted">' + fh(r.inicio) + ' → ' + fh(r.fin) + '</span></p>' +
+          '<div class="row"><button class="btn ok grow" id="acEnt"' + (r.vigente ? '' : ' disabled') + '>🟢 Entrada</button><button class="btn line grow" id="acSal">🔴 Salida</button></div>' +
+          (r.accesos.length ? '<p class="small muted" style="margin-top:8px">' + r.accesos.map((x) => (x.tipo === 'entrada' ? '🟢 ' : '🔴 ') + fh(x.at)).join('<br>') + '</p>' : '') + '</div>';
+        $('acEnt').onclick = () => ver('entrada'); $('acSal').onclick = () => ver('salida');
+        if (marcar) toast(marcar === 'entrada' ? '🟢 Entrada anotada' : '🔴 Salida anotada');
+      } catch (e) { $('acRes').innerHTML = '<div class="aviso bad" style="margin-top:12px">' + esc(e.message) + '</div>'; }
+    };
+    $('acVer').onclick = () => ver();
+    if ($('acScan')) $('acScan').onclick = async () => {
+      const v = $('acVid'); let st;
+      try { st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); } catch (e) { toast('Sin permiso de cámara: escribe el código'); return; }
+      v.srcObject = st; v.style.display = 'block'; await v.play();
+      const det = new window.BarcodeDetector({ formats: ['qr_code'] }); let vueltas = 0;
+      const mirar = async () => { const c = await det.detect(v).catch(() => []); if (c[0]) { st.getTracks().forEach((x) => x.stop()); v.style.display = 'none'; $('acCod').value = String(c[0].rawValue).replace(/^.*pase=/, '').slice(0, 8); ver(); }
+        else if (++vueltas < 300 && v.isConnected) requestAnimationFrame(mirar); else st.getTracks().forEach((x) => x.stop()); };
+      mirar();
+    };
+  }
+  // 🏷️ Descuento por estadía larga (por cada lugar)
+  async function vDescuentos(T) {
+    if (!(await mods()).descuentos) return sinMod(T, 'descuentos', 'Un % menos para quien reserva más tiempo: desde las horas, días o meses que elijas.');
+    const r = await Api.rpc('mis_estacionamientos');
+    T.innerHTML = '<p class="muted small">Ej.: 10 % menos desde 5 (horas, días o meses según lo que reserven). 0 = sin descuento.</p>' +
+      (r.length ? r.map((e) => '<div class="card" style="margin-top:10px"><b>' + esc(e.titulo) + '</b><div class="grid2"><div><label>% de descuento</label><input type="number" inputmode="numeric" min="0" max="50" data-pct="' + e.id + '" value="' + (+e.desc_pct || 0) + '"></div>' +
+        '<div><label>Desde (cantidad)</label><input type="number" inputmode="numeric" min="0" max="365" data-desde="' + e.id + '" value="' + (+e.desc_desde || 0) + '"></div></div><button class="btn block" data-gd="' + e.id + '" style="margin-top:8px">💾 Guardar</button></div>').join('')
+        : '<div class="vacio"><p>Publica un estacionamiento primero.</p></div>');
+    T.onclick = async (ev) => { const b = ev.target.closest('[data-gd]'); if (!b) return; const id = b.dataset.gd;
+      try { await Api.rpc('descuento_guardar', { p_id: id, p_pct: Math.round(+T.querySelector('[data-pct="' + id + '"]').value || 0), p_desde: Math.round(+T.querySelector('[data-desde="' + id + '"]').value || 0) }); toast('💾 Descuento guardado'); } catch (e) { toast(e.message); } };
+  }
+  // 💰 Ganancias y ocupación + planilla
+  async function vGanancias(T) {
+    if (!(await mods()).ganancias) return sinMod(T, 'ganancias', 'Cuánto ganas por mes, ocupación de cada lugar, tu mejor día y planilla para Excel.');
+    const g = await Api.rpc('ganancias'), DIAS = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+    const mejor = Object.keys(g.dias).sort((a, b) => g.dias[b] - g.dias[a])[0];
+    T.innerHTML = '<div class="card"><span class="muted small">Este mes</span><div style="font-size:26px;font-weight:700" id="gMes">' + clp(g.mes) + '</div>' + (mejor ? '<div class="small">📅 Tu mejor día: <b>' + DIAS[mejor] + '</b></div>' : '') + '</div>' +
+      '<h3 style="margin:14px 0 6px">Ocupación (últimos 30 días)</h3>' + (g.lugares.length ? g.lugares.map((l) => '<div class="card" style="margin-top:8px"><div class="row between"><b>' + esc(l.titulo) + '</b><b>' + l.ocupacion + ' %</b></div><div class="barra"><i style="width:' + l.ocupacion + '%"></i></div><div class="small muted">' + l.reservas + ' reservas · ' + clp(l.ingresos) + '</div></div>').join('') : '<div class="vacio"><p>Sin estacionamientos.</p></div>') +
+      '<button class="btn sec block" id="gCsv" style="margin-top:12px"' + (g.filas.length ? '' : ' disabled') + '>⬇️ Planilla para Excel (' + g.filas.length + ')</button>';
+    $('gCsv').onclick = () => { const c = (x) => '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"';
+      const u = URL.createObjectURL(new Blob(['\ufeff' + 'fecha,lugar,modalidad,cantidad,total,estado\n' + g.filas.map((f) => [f.fecha, f.lugar, f.modalidad, f.cantidad, f.total, f.estado].map(c).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a'); a.href = u; a.download = 'ganancias.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); };
+  }
   async function vPatentes(T, lista) {
     const r = lista || await Api.rpc('mis_patentes');
     T.innerHTML = '<p class="muted small">Guarda las patentes de tus autos: al reservar eliges una y el dueño sabe qué auto llega. ' + r.length + ' de 5.</p>' +

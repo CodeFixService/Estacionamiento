@@ -331,3 +331,5 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 4px var(--brand-so
 .slotpago.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .tabla td:last-child { text-align: right; }
 #rMod button { flex: 1; }
+@media (max-width: 359px) { .grid2 { grid-template-columns: 1fr; } } /* G94: a 320 px el formulario de reserva no cabía en 2 columnas */
+@media (max-width: 359px) { .galeria { margin: 0 -12px; padding: 0 12px; } } /* G94: a 320 px la galería de la ficha se salía 4 px */
