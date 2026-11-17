@@ -33,7 +33,7 @@ async function reintentarPush(s: Rpc, preparar: () => Promise<boolean>) {
   return n;
 }
 
-const VERSION = '1.2';
+const VERSION = '1.3';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -165,6 +165,8 @@ async function limpiar(db: SupabaseClient, req: Request) {
 if (Deno.env.get('SUPABASE_URL')) {
   Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+    // G99 a ⚡ Aviso de Mercado Pago (webhook): no se confía en lo que llega; la base vuelve a preguntarle a MP por esa referencia.
+    { const ref = new URL(req.url).searchParams.get('cfx_mp'); if (ref) { try { await adminDb().rpc('cfx_mp_aviso', { p_ref: ref.slice(0, 80) }); } catch { /* el cron revisa igual */ } return new Response('ok', { headers: CORS }); } }
     const json = (o: unknown, status = 200) =>
       new Response(JSON.stringify(o), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
     try {
