@@ -375,7 +375,7 @@
     // Quien solo arrienda ve solo "verifica tu identidad"; WhatsApp, link de pago y publicar son de quien publica. El admin no ve nada.
     const dueno = !!(Api.cuenta && Api.cuenta.uso && Api.cuenta.uso.publicados > 0);
     const falta = Api.admin() ? [] : [p.falta.verificar && ['#/verificar', '🪪 Verifica tu identidad'], dueno && p.falta.whatsapp && ['#/mas/perfil', '📲 Agrega tu WhatsApp'],
-      dueno && p.falta.link && ['#/mas/links', '💳 Configura tu link de pago']].filter(Boolean);
+      dueno && p.falta.link && ['#/mas/links', '💳 Configura cómo te pagan: link o ⚡ Mercado Pago']].filter(Boolean);
     const lista = filtrar(l, f);
     $('rsC').innerHTML = '<div class="kpis">' + [['revisar', '🧾 Por revisar', p.revisar], ['proximas', '📅 Hoy', p.hoy], ['pagando', '⏳ Esperando pago', p.pagando], ['devolver', '💸 Por devolver', p.devolver]]
       .map((k) => '<a class="kpi" href="#/reservas/' + k[0] + '" style="color:var(--ink)"><b>' + k[2] + '</b><small class="t">' + k[1] + '</small></a>').join('') + '</div>' +
@@ -709,7 +709,7 @@
   async function vLinks(T) {
     const l = await Api.rpc('mis_links');
     T.innerHTML = '<div class="card"><b>💳 Tus links de pago</b><p class="small muted" style="margin:6px 0 0">Tus arrendatarios pagan con el link <b>activo</b> y suben el comprobante; tú apruebas. ' +
-      'Tienes 2 espacios (por ejemplo Mercado Pago y transferencia) y eliges cuál se usa. Si pones un <b>abono</b>, se cobra solo eso para confirmar y el resto se paga al llegar. Solo tú ves estos datos.</p></div>' +
+      'Tienes 2 espacios (por ejemplo Mercado Pago y transferencia) y eliges cuál se usa. Con ⚡ Mercado Pago conectado (abajo) los links son opcionales: se confirma solo. Si pones un <b>abono</b>, se cobra solo eso para confirmar y el resto se paga al llegar. Solo tú ves estos datos.</p></div>' +
       '<div class="card" id="lkMp" hidden></div>' +  // G98 ⚡ Mercado Pago propio (núcleo pagos.js)
       l.map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '"><div class="row between"><b>Espacio ' + s.slot + '</b>' +
         '<label class="check" style="margin:0"><input type="radio" name="lkAct"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +

@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '56') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '57') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1157,6 +1157,15 @@ end $$;
 
 -- =====================================================================
 --  Cuenta
+-- G100 ⚡ El dueño ya puede cobrar: link activo o su Mercado Pago conectado (plpgsql: cfx_mp_neg_activo es del núcleo, más abajo).
+create or replace function public._cobro_listo(p_dueno uuid) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+begin
+  return exists (select 1 from public.links_pago where dueno = p_dueno and tipo = 'arriendo' and activo and url <> '')
+    or coalesce(public.cfx_mp_neg_activo(p_dueno), false);
+end $$;
+revoke all on function public._cobro_listo(uuid) from public, anon, authenticated;
+
 -- =====================================================================
 create or replace function public.mi_cuenta() returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -1178,7 +1187,7 @@ begin
       'publicados', (select count(*) from public.estacionamientos where dueno = p.id),
       'arrendando', (select count(*) from public.arriendos where arrendatario = p.id and estado in ('pendiente', 'por_pagar', 'en_revision', 'aceptado')),
       'favoritos', (select count(*) from public.favoritos where usuario = p.id)),
-    'link_listo', exists (select 1 from public.links_pago where dueno = p.id and tipo = 'arriendo' and activo and url <> ''));
+    'link_listo', public._cobro_listo(p.id));  -- G100 ⚡ link o Mercado Pago
 end $$;
 
 drop function if exists public.guardar_perfil(text, text, text, text, text, text);
@@ -1778,7 +1787,7 @@ begin
     'falta', jsonb_build_object(
       'verificar', not yo.verificado,
       'whatsapp', yo.whatsapp is null,
-      'link', not exists (select 1 from public.links_pago where dueno = yo.id and tipo = 'arriendo' and activo and url <> ''),
+      'link', not public._cobro_listo(yo.id),  -- G100 ⚡ link o Mercado Pago
       'publicar', not exists (select 1 from public.estacionamientos where dueno = yo.id)));
 end $$;
 
@@ -2396,8 +2405,8 @@ language sql stable security definer set search_path = public as $$
       'ok', exists (select 1 from public.estacionamientos e where e.dueno = p.id)),
     jsonb_build_object('k', 'verificar', 't', 'Verifica tu identidad', 'd', 'Solo las personas verificadas pueden arrendar y publicar.', 'ir', '#/verificar', 'ok', p.verificado),
     jsonb_build_object('k', 'whatsapp', 't', 'Tu WhatsApp', 'd', 'Para coordinar con quien arrienda.', 'ir', '#/mas/perfil', 'ok', p.whatsapp is not null),
-    jsonb_build_object('k', 'link', 't', 'Tu link de pago', 'd', 'Para que te paguen el arriendo.', 'ir', '#/mas/links',
-      'ok', exists (select 1 from public.links_pago l where l.dueno = p.id and l.tipo = 'arriendo' and l.activo and l.url <> '')))
+    jsonb_build_object('k', 'link', 't', 'Cómo te pagan', 'd', 'Tu link de pago o ⚡ Mercado Pago para cobrar el arriendo.', 'ir', '#/mas/links',
+      'ok', public._cobro_listo(p.id)))
   from public.perfiles p where p.id = auth.uid()), '[]'::jsonb)
 $$;
 

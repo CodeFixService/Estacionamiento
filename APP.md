@@ -8,6 +8,7 @@
 - 🔎 Filtros (G84 c): js/mapa.js F + pasa() + chips() + abrirFiltros(); características en estacionamientos (techado, acceso24, seguridad, carga, camara, porton); mapa() devuelve t,h,sg,cg,cam,pt; g84c() = la base ya trae cam. Publicar: js/app.js #pCam/#pPt. Prueba: SaaS/pruebas/g84c.js.
 - ⏰🔔🔁 (G84 d+e, bd 46): avisar_por_terminar() y renovar_mensuales() las llama liberar_vencidas(); trigger arr_liberado → _alerta_liberado (alerta de zona); renovar_arriendo(id, si) y comprobante_extension(id, ruta) las llama js/app.js (#rRenovar, #rExtComp/#rExtSubir en vReserva). mis_arriendos trae renovar y ext.auto/ext.pago. Prueba: SaaS/pruebas/g84d.js.
 - Versiones: js/config.js l.9 + version.json + instalar.sql ('version_bd'). Prueba: SaaS/pruebas/g84.js.
+- G100 a (2.14.92 · bd 57): ⚡ _cobro_listo(dueño) = link activo o MP conectado → mi_cuenta.link_listo, panel.falta.link y guía. Prueba: SaaS/pruebas/g100.js.
 - G99 a (2.14.91 · bd 56 · enviar 1.3): ⚡ aviso instantáneo de Mercado Pago (núcleo): cfx_mp_aviso_url_app · enviar atiende ?cfx_mp=. Prueba: SaaS/pruebas/g99.js.
 - G98 (2.14.90 · bd 55): ⚡ pago con el Mercado Pago del dueño (núcleo mp_negocio.sql): arriendo_mp_pagar/arriendo_mp_revisar(id) · mis_arriendos.mp · refs 'arriendo:<id>' y 'ext:<id>:<ext_at>' (🔁 mes / más tiempo) · gancho cfx_mp_neg_pagado_app acepta como el dueño (responder_arriendo / responder_extension) · columnas mp_desde/mp_pago · js/app.js [data-mp] en vReserva, volver ?mp=<id>#/r/<id> · dueño: Más → 💳 Links de pago (#lkMp). Prueba: SaaS/pruebas/g98.js.
 
