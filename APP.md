@@ -9,6 +9,8 @@
 - ⏰🔔🔁 (G84 d+e, bd 46): avisar_por_terminar() y renovar_mensuales() las llama liberar_vencidas(); trigger arr_liberado → _alerta_liberado (alerta de zona); renovar_arriendo(id, si) y comprobante_extension(id, ruta) las llama js/app.js (#rRenovar, #rExtComp/#rExtSubir en vReserva). mis_arriendos trae renovar y ext.auto/ext.pago. Prueba: SaaS/pruebas/g84d.js.
 - Versiones: js/config.js l.9 + version.json + instalar.sql ('version_bd'). Prueba: SaaS/pruebas/g84.js.
 
+- G95 (2.14.87 · bd 52): la cuenta parte FREE (_nuevo_usuario sin dias_regalo) · cfx_pro_prueba_app → plan_origen 'prueba' · cuentas de antes anotadas 1 vez (g95_pruebas). Prueba: SaaS/pruebas/g95.js.
+
 ## 🧠 Del núcleo: falta aplicar aquí
 - G42e (núcleo 2.78): utilidades Bootstrap 5.3.8 ya usan los colores CodeFix (--bs-* → --cfx-*). Al revisar esta app: si quiere Bootstrap, enlazar vendor/bootstrap-utilities.min.css ANTES de su CSS (nunca el Bootstrap completo: choca con .btn/.card/.modal/.row/.toast).
 - G48 (núcleo 2.77): revisar en el celular ✋ mover secciones desde el título y 🎨 Color y modo → Colores a tu gusto (fondo, texto, íconos y +); si la app pinta íconos o fondo con colores fijos, pasarlos a var(--cfx-icono)/var(--cfx-fondo).
