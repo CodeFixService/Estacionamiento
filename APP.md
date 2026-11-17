@@ -6,6 +6,7 @@
 - Tabla `arriendos` (instalar.sql ~l.71 + columnas ~l.955) · funciones: solicitar_arriendo (con p_patente), subir_comprobante, responder_arriendo, cerrar_arriendo (cancelar/finalizar/devuelto; finalizar antes = devolución proporcional en devolver_monto), pedir_extension / responder_extension (ext_*), mis_arriendos.
 - Patentes: tabla `patentes` + mis_patentes/guardar_patente/borrar_patente/patente_arriendo. Pantallas en js/app.js: reservar(), vReserva(), vPatentes() (Más → Mis patentes).
 - 🔎 Filtros (G84 c): js/mapa.js F + pasa() + chips() + abrirFiltros(); características en estacionamientos (techado, acceso24, seguridad, carga, camara, porton); mapa() devuelve t,h,sg,cg,cam,pt; g84c() = la base ya trae cam. Publicar: js/app.js #pCam/#pPt. Prueba: SaaS/pruebas/g84c.js.
+- ⏰🔔🔁 (G84 d+e, bd 46): avisar_por_terminar() y renovar_mensuales() las llama liberar_vencidas(); trigger arr_liberado → _alerta_liberado (alerta de zona); renovar_arriendo(id, si) y comprobante_extension(id, ruta) las llama js/app.js (#rRenovar, #rExtComp/#rExtSubir en vReserva). mis_arriendos trae renovar y ext.auto/ext.pago. Prueba: SaaS/pruebas/g84d.js.
 - Versiones: js/config.js l.9 + version.json + instalar.sql ('version_bd'). Prueba: SaaS/pruebas/g84.js.
 
 ## 🧠 Del núcleo: falta aplicar aquí

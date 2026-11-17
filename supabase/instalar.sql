@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '44') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '46') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -985,7 +985,12 @@ alter table public.arriendos
   add column if not exists ext_cantidad int,
   add column if not exists ext_monto int,
   add column if not exists ext_comprobante text,
-  add column if not exists ext_at timestamptz;
+  add column if not exists ext_at timestamptz,
+  -- G84 d+e: fin para el que ya se avisó "termina pronto" · arriendo mensual que se renueva solo · fin para el que ya se pidió renovar.
+  add column if not exists aviso_fin_para timestamptz,
+  add column if not exists renovar boolean not null default false,
+  add column if not exists renovar_para timestamptz;
+alter table public.perfiles add column if not exists alerta_libre_at timestamptz;
 create table if not exists public.patentes (
   id uuid primary key default gen_random_uuid(),
   usuario uuid not null references public.perfiles (id) on delete cascade,
@@ -1270,6 +1275,8 @@ begin
   end loop;
   perform public.finalizar_terminados();
   perform public.avisar_devoluciones();
+  -- G84 d+e (se definen al final del archivo): ⏰ aviso antes de terminar y 🔁 renovación del arriendo mensual.
+  if to_regprocedure('public.avisar_por_terminar()') is not null then perform public.renovar_mensuales(); perform public.avisar_por_terminar(); end if;
   return n;
 end $$;
 
@@ -1558,6 +1565,116 @@ begin
   end if;
 end $$;
 
+-- =====================================================================
+-- G84 d+e (bd 46) · ⏰ aviso antes de terminar · 🔔 "se liberó uno cerca" · 🔁 arriendo mensual que se renueva solo.
+-- Las corre liberar_vencidas() (cada minuto con pg_cron, o al abrir Reservas). Sin permisos para nadie: son internas.
+-- =====================================================================
+-- ⏰ Una sola vez por cada hora de término (si se extiende, vuelve a avisar): hora = 15 min antes · día = 2 h · mes = 3 días.
+create or replace function public.avisar_por_terminar() returns int
+language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0; cuando text;
+begin
+  for r in update public.arriendos a set aviso_fin_para = a.fin
+    from public.estacionamientos e
+    where e.id = a.estacionamiento and a.estado = 'aceptado' and a.inicio <= now() and a.fin > now() and a.aviso_fin_para is distinct from a.fin
+      and a.fin - now() <= case a.modalidad when 'hora' then interval '15 minutes' when 'dia' then interval '2 hours' else interval '3 days' end
+      and not (a.modalidad = 'mes' and a.renovar)   -- el mensual que se renueva tiene su propio aviso
+    returning a.id, a.arrendatario, a.dueno, a.modalidad, a.fin, a.ext_cantidad, e.titulo loop
+    n := n + 1;
+    cuando := case when r.modalidad = 'mes' then 'el ' || to_char(r.fin at time zone 'America/Santiago', 'DD-MM') else 'a las ' || to_char(r.fin at time zone 'America/Santiago', 'HH24:MI') end;
+    perform public._notificar(r.arrendatario, '⏰ Tu estacionamiento termina ' || cuando,
+      case when r.ext_cantidad is not null then 'Tu pedido de más tiempo en "' || r.titulo || '" sigue esperando al dueño'
+           else '"' || r.titulo || '": si necesitas más, pide más tiempo antes de que termine' end, '#/r/' || r.id);
+    perform public._notificar(r.dueno, '⏰ Una reserva termina ' || cuando, '"' || r.titulo || '" queda libre a esa hora', '#/r/' || r.id);
+  end loop;
+  return n;
+end $$;
+
+-- 🔁 Mensual que se renueva: 5 días antes de terminar pide solo 1 mes más (mismo flujo de "más tiempo": el dueño acepta al recibir el pago).
+-- Si el mes siguiente ya lo reservó otra persona, o el dueño rechaza / quien arrienda retira el pedido, la renovación se apaga.
+create or replace function public.renovar_mensuales() returns int
+language plpgsql security definer set search_path = public as $$
+declare a public.arriendos; n int := 0; t text; extra int;
+begin
+  update public.arriendos set renovar = false where renovar and estado = 'aceptado' and renovar_para = fin and ext_cantidad is null;
+  for a in select * from public.arriendos where estado = 'aceptado' and modalidad = 'mes' and renovar and fin > now() and fin - now() <= interval '5 days'
+      and ext_cantidad is null and renovar_para is distinct from fin for update skip locked loop
+    select titulo into t from public.estacionamientos where id = a.estacionamiento;
+    if exists (select 1 from public.arriendos o where o.estacionamiento = a.estacionamiento and o.id <> a.id and o.estado in ('por_pagar', 'en_revision', 'aceptado')
+        and tstzrange(o.inicio, o.fin + public._unidad(o.modalidad) * coalesce(o.ext_cantidad, 0)) && tstzrange(a.fin, a.fin + interval '1 month')) then
+      update public.arriendos set renovar = false, renovar_para = a.fin where id = a.id;
+      perform public._notificar(a.arrendatario, '🔁 No se pudo renovar', 'El mes siguiente de "' || t || '" ya está reservado. Tu arriendo termina el ' || to_char(a.fin at time zone 'America/Santiago', 'DD-MM'), '#/r/' || a.id);
+      continue;
+    end if;
+    extra := round(a.total::numeric / greatest(a.cantidad, 1))::int;
+    if a.ext_comprobante is not null then insert into public.por_borrar (ruta) values ('privado/' || a.ext_comprobante) on conflict do nothing; end if;
+    update public.arriendos set ext_cantidad = 1, ext_monto = extra, ext_comprobante = null, ext_at = now(), renovar_para = a.fin, actualizado = now() where id = a.id;
+    perform public._notificar(a.arrendatario, '🔁 Toca renovar tu mes', 'Paga $' || replace(to_char(extra, 'FM999G999G999'), ',', '.') || ' de "' || t || '" y sube el comprobante antes del ' || to_char(a.fin at time zone 'America/Santiago', 'DD-MM'), '#/r/' || a.id);
+    perform public._notificar(a.dueno, '🔁 Renovación mensual', '"' || t || '" se renueva otro mes. Acepta cuando recibas el pago', '#/r/' || a.id);
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- Quien arrienda prende o apaga la renovación de su arriendo mensual.
+create or replace function public.renovar_arriendo(p_id uuid, p_si boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; t text;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.modalidad <> 'mes' then raise exception 'Solo los arriendos por mes se renuevan solos'; end if;
+  if a.estado <> 'aceptado' or a.fin <= now() then raise exception 'Solo en una reserva confirmada y vigente'; end if;
+  if a.renovar = coalesce(p_si, false) then return; end if;
+  update public.arriendos set renovar = coalesce(p_si, false), renovar_para = null, actualizado = now() where id = p_id;
+  select titulo into t from public.estacionamientos where id = a.estacionamiento;
+  perform public._notificar(a.dueno, case when p_si then '🔁 Arriendo mensual que se renueva' else '🔁 Ya no se renueva' end,
+    yo.nombre || case when p_si then ' quiere seguir cada mes en "' else ' dejó de renovar "' end || t || '"', '#/r/' || p_id);
+end $$;
+
+-- Quien arrienda sube (o cambia) el comprobante de un "más tiempo" que sigue esperando al dueño (p. ej. la renovación del mes).
+create or replace function public.comprobante_extension(p_id uuid, p_ruta text) returns void
+language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); a public.arriendos; t text;
+begin
+  select * into a from public.arriendos where id = p_id for update;
+  if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
+  if a.estado <> 'aceptado' or a.ext_cantidad is null then raise exception 'No hay un pedido de más tiempo esperando'; end if;
+  if p_ruta is null or p_ruta !~ ('^' || yo.id || '/[A-Za-z0-9._-]+$') then raise exception 'Sube la foto del comprobante'; end if;
+  if a.ext_comprobante is not null and a.ext_comprobante <> p_ruta then insert into public.por_borrar (ruta) values ('privado/' || a.ext_comprobante) on conflict do nothing; end if;
+  update public.arriendos set ext_comprobante = p_ruta, actualizado = now() where id = p_id;
+  select titulo into t from public.estacionamientos where id = a.estacionamiento;
+  perform public._notificar(a.dueno, '🧾 Comprobante del tiempo extra', yo.nombre || ' subió el comprobante de "' || t || '". Revísalo y acepta', '#/r/' || p_id);
+end $$;
+
+-- 🔔 "Se liberó uno cerca": cuando un arriendo EN USO termina o se cancela y el lugar queda libre, avisa a quienes tienen
+-- la alerta de zona (la misma de "nuevo estacionamiento cerca", Premium). Máx. 1 aviso cada 30 min por persona.
+create or replace function public._alerta_liberado() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare e public.estacionamientos;
+begin
+  if not (old.estado = 'aceptado' and new.estado in ('finalizado', 'cancelado') and old.inicio <= now()) then return new; end if;
+  select * into e from public.estacionamientos where id = new.estacionamiento;
+  if not found or e.estado not in ('disponible', 'ocupado') then return new; end if;
+  if exists (select 1 from public.arriendos o where o.estacionamiento = new.estacionamiento and o.id <> new.id
+      and o.estado in ('por_pagar', 'en_revision', 'aceptado') and o.inicio <= now() + interval '30 minutes' and o.fin > now()) then return new; end if;
+  with av as (
+    update public.perfiles p set alerta_libre_at = now()
+    where p.id in (select q.id from public.perfiles q
+        where q.alerta_km is not null and q.id not in (new.dueno, new.arrendatario) and public._premium(q) and not q.suspendido
+          and (q.alerta_libre_at is null or q.alerta_libre_at < now() - interval '30 minutes')
+          and 6371 * 2 * asin(sqrt(power(sin(radians(e.lat - q.alerta_lat) / 2), 2) +
+            cos(radians(q.alerta_lat)) * cos(radians(e.lat)) * power(sin(radians(e.lng - q.alerta_lng) / 2), 2))) <= q.alerta_km
+        limit 300)
+    returning p.id)
+  insert into public.notificaciones (usuario, titulo, cuerpo, url)
+  select av.id, '🔔 Se liberó un estacionamiento cerca', left(e.titulo || coalesce(' · ' || e.comuna, ''), 200), '#/e/' || e.id from av;
+  return new;
+exception when others then return new;   -- un aviso nunca debe impedir terminar o cancelar un arriendo
+end $$;
+drop trigger if exists arr_liberado on public.arriendos;
+create trigger arr_liberado after update of estado on public.arriendos for each row execute function public._alerta_liberado();
+
 create or replace function public.mis_patentes() returns jsonb
 language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object('id', id, 'patente', patente, 'alias', coalesce(alias, '')) order by creado), '[]')
@@ -1609,9 +1726,11 @@ begin
       'inicio', a.inicio, 'fin', a.fin, 'cantidad', a.cantidad, 'total', a.total, 'monto_pagar', a.monto_pagar,
       'saldo_aplicado', a.saldo_aplicado, 'saldo_monto', a.saldo_monto, 'saldo_hasta', a.saldo_hasta, 'expira_at', a.expira_at,
       'motivo', a.motivo, 'nota', a.nota, 'creado', a.creado, 'soy_dueno', a.dueno = me, 'comprobante', a.comprobante,
-      'patente', a.patente, 'devolver_monto', a.devolver_monto,
+      'patente', a.patente, 'devolver_monto', a.devolver_monto, 'renovar', a.renovar,
       'ext', case when a.ext_cantidad is not null and a.estado = 'aceptado' then jsonb_build_object('cantidad', a.ext_cantidad, 'monto', a.ext_monto,
-        'comprobante', a.ext_comprobante, 'hasta', a.fin + public._unidad(a.modalidad) * a.ext_cantidad) end,
+        'comprobante', a.ext_comprobante, 'hasta', a.fin + public._unidad(a.modalidad) * a.ext_cantidad, 'auto', a.renovar and a.renovar_para = a.fin,
+        'pago', case when a.arrendatario = me then (select jsonb_build_object('url', l.url, 'texto', l.texto) from public.links_pago l
+          where l.dueno = a.dueno and l.tipo = 'arriendo' and l.activo order by l.slot limit 1) end) end,
       'orden', case a.estado when 'en_revision' then 0 when 'por_pagar' then 1 when 'pendiente' then 1 when 'aceptado' then 2 else 3 end,
       'est', jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1], 'direccion', e.direccion,
         'lat', e.lat, 'lng', e.lng, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes),
@@ -2155,6 +2274,7 @@ grant execute on function
   public.mis_estacionamientos(), public.favorito(uuid), public.mis_favoritos(),
   public.solicitar_arriendo(uuid, text, timestamptz, int, text, text), public.subir_comprobante(uuid, text),
   public.pedir_extension(uuid, int, text), public.responder_extension(uuid, boolean), public.mis_patentes(),
+  public.renovar_arriendo(uuid, boolean), public.comprobante_extension(uuid, text),
   public.guardar_patente(text, text), public.borrar_patente(uuid), public.patente_arriendo(uuid, text),
   public.responder_arriendo(uuid, boolean, text), public.cerrar_arriendo(uuid, text),
   public.mis_arriendos(), public.panel(), public.mis_estadisticas(), public.calificar(uuid, int, text),
@@ -2191,6 +2311,23 @@ create or replace function public.cfx_avisar(p_cuenta uuid, p_titulo text, p_cue
 language sql security definer set search_path = public as $$ insert into public.notificaciones (usuario, titulo, cuerpo, url) values (p_cuenta, p_titulo, p_cuerpo, '#/premium') $$;
 create or replace function public.cfx_avisar_admin(p_titulo text, p_cuerpo text) returns void
 language sql security definer set search_path = public as $$ insert into public.notificaciones (usuario, titulo, cuerpo, url) select public._admin_id(), p_titulo, p_cuerpo, '#/admin' where public._admin_id() is not null $$;
+
+-- G87 A · Lista de cuentas para el Centro de Mando → Control → Negocios (antes decía "aún no tiene la lista de negocios").
+-- Hay un solo tipo de cuenta (G83): Negocio = quien ya publicó un estacionamiento · Cliente = quien todavía no. Solo la llama cfx_negocios (admin).
+create or replace function public.cfx_cuentas_app(p_rol text, p_q text) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'email', p.email, 'nombre', p.nombre, 'rol', p_rol,
+    'premium_hasta', case when p.premium_hasta > now() then p.premium_hasta end, 'creado', p.creado, 'suspendido', p.suspendido) order by p.creado desc), '[]'::jsonb)
+  from (select x.* from public.perfiles x
+        where not x.es_admin and (p_rol <> 'cliente') = exists (select 1 from public.estacionamientos e where e.dueno = x.id)
+          and (coalesce(p_q, '') = '' or x.email ilike '%' || p_q || '%' or x.nombre ilike '%' || p_q || '%')
+        order by x.creado desc limit 300) p
+$$;
+create or replace function public.cfx_quitar_premium(p_cuenta uuid) returns void
+language sql security definer set search_path = public as $$
+  update public.perfiles set premium_hasta = null, plan_origen = null where id = p_cuenta and not es_admin
+$$;
+revoke all on function public.cfx_cuentas_app(text, text), public.cfx_quitar_premium(uuid) from public, anon, authenticated;
 
 -- Ganchos de administración para el núcleo (planes, textos, a quién avisar y verificación).
 create or replace function public.cfx_planes_app() returns jsonb
@@ -3931,7 +4068,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.patentes', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;

@@ -222,8 +222,18 @@
       if (dueno) b.push('<div class="card" style="margin-top:12px"><b>⏱️ Te piden más tiempo</b><p class="small" style="margin:6px 0 0">' + mas + '</p>' +
         (x.ext.comprobante ? '<img class="ver-img" id="rExtImg" alt="Comprobante del extra" style="margin-top:8px">' : '<p class="small muted">Sin comprobante: el extra te lo paga directo.</p>') +
         '<div class="row" style="margin-top:10px"><button class="btn ok grow" id="rExtSi">✅ Aceptar</button><button class="btn bad grow" id="rExtNo">Rechazar</button></div></div>');
-      else b.push('<div class="aviso" style="margin-top:12px">⏱️ Pediste más tiempo: ' + mas + '. Esperando al dueño. <button class="btn small line" id="rExtQuitar" style="margin-left:6px">Quitar</button></div>');
+      else b.push('<div class="aviso" style="margin-top:12px">' + (x.ext.auto ? '🔁 Renovación del mes: ' : '⏱️ Pediste más tiempo: ') + mas + '. ' + (x.ext.comprobante ? 'Comprobante enviado: esperando al dueño.' : 'Esperando al dueño.') +
+        ' <button class="btn small line" id="rExtQuitar" style="margin-left:6px">' + (x.ext.auto ? 'No renovar' : 'Quitar') + '</button></div>' +
+        // G84 e: pagar y subir el comprobante de un "más tiempo" que sigue esperando (la renovación mensual llega sin comprobante).
+        ('renovar' in x && !x.ext.comprobante ? (x.ext.pago && x.ext.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.ext.pago.url) + '">💳 Pagar ' + clp(x.ext.monto) + '</a>' : '') +
+          '<label>Foto del comprobante</label><input type="file" id="rExtComp" accept="image/*"><button class="btn block" id="rExtSubir" style="margin-top:10px">📤 Subir comprobante</button>' : ''));
     } else if (g84 && !dueno && enCurso && x.cantidad < UN[2]) b.push('<button class="btn sec block" id="rExt" style="margin-top:12px">⏱️ Pedir más tiempo</button>');
+    // G84 e: 🔁 arriendo mensual que se renueva solo ('renovar' in x = la base ya está actualizada).
+    if ('renovar' in x && x.modalidad === 'mes' && enCurso) {
+      if (dueno) { if (x.renovar) b.push('<div class="aviso" style="margin-top:12px">🔁 Se renueva cada mes: 5 días antes te llega el pedido para aceptarlo.</div>'); }
+      else b.push('<div class="card" style="margin-top:12px"><div class="row between"><b>🔁 Renovar cada mes</b><button class="btn small ' + (x.renovar ? 'line' : '') + '" id="rRenovar">' + (x.renovar ? 'Apagar' : 'Prender') + '</button></div>' +
+        '<p class="small muted" style="margin:6px 0 0">' + (x.renovar ? 'Prendido: 5 días antes de terminar te avisamos para pagar el mes siguiente.' : 'Apagado: el arriendo termina el ' + esc(fh(x.fin)) + '.') + '</p></div>');
+    }
     const acc = [];
     if (['pendiente', 'por_pagar', 'en_revision', 'aceptado'].includes(x.estado)) acc.push('<button class="btn line grow" id="rCancelar">Cancelar reserva</button>');
     if (x.estado === 'aceptado') acc.push('<button class="btn grow" id="rFin">' + (libres > 0 ? 'Terminar antes' : 'Finalizar') + '</button>');
@@ -270,6 +280,13 @@
     if ($('rExtImg')) U.urlPrivada(x.ext.comprobante).then((u) => { $('rExtImg').src = u; $('rExtImg').onclick = () => window.open(u, '_blank'); });
     if ($('rExtSi')) $('rExtSi').onclick = () => hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: true }), 'Listo: tiene más tiempo ✅');
     if ($('rExtNo')) $('rExtNo').onclick = async () => { if (await confirmar('¿Rechazar el tiempo extra? La reserva termina a la hora acordada.', 'Rechazar', true)) hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: false }), 'Rechazado'); };
+    if ($('rRenovar')) $('rRenovar').onclick = () => hacer(() => Api.rpc('renovar_arriendo', { p_id: id, p_si: !x.renovar }), x.renovar ? 'Ya no se renueva' : 'Listo: se renueva cada mes 🔁');
+    if ($('rExtSubir')) $('rExtSubir').onclick = async (ev) => {
+      const f = $('rExtComp').files[0]; if (!f) return toast('Elige la foto del comprobante');
+      ev.target.disabled = true;
+      try { const ruta = await U.subirFoto(f, 'privado', U.FOTO('comprobante')); await Api.rpc('comprobante_extension', { p_id: id, p_ruta: ruta }); toast('Comprobante enviado 🧾'); recargar(); }
+      catch (er) { ev.target.disabled = false; fallo(er); }
+    };
     if ($('rExtQuitar')) $('rExtQuitar').onclick = () => hacer(() => Api.rpc('pedir_extension', { p_id: id, p_cantidad: 0, p_ruta: null }), 'Solicitud quitada');
     if ($('rExt')) $('rExt').onclick = () => {
       const max = UN[2] - x.cantidad, precio = Math.round(x.total / Math.max(1, x.cantidad));
@@ -758,7 +775,7 @@
       '<div class="row between small" style="margin-top:10px"><span>Arriendos activos</span><b>' + a.uso.arrendando + ' / ' + a.lim.arrendar + '</b></div><div class="barra"><i style="width:' + Math.min(100, a.uso.arrendando / a.lim.arrendar * 100) + '%"></i></div>' +
       '<a class="btn ' + (a.premium ? 'sec' : 'gold') + ' block" style="margin-top:14px" href="#/premium">' + (a.premium ? 'Ver mi Premium' : '⭐ Hazte Premium') + '</a></div>') +
       '<div class="sec-tit">Alerta de zona ' + (Api.puede('alertas') ? '' : '<span class="pill gold">Premium</span>') + '</div><div class="card' + (Api.puede('alertas') ? '' : ' candado') + '">' +
-      '<p class="small" style="margin-top:0">Te avisamos cuando publiquen un estacionamiento cerca de la zona que elijas.</p>' +
+      '<p class="small" style="margin-top:0">Te avisamos cuando publiquen o se libere un estacionamiento cerca de la zona que elijas.</p>' +
       (a.alerta ? '<p class="small"><b>Activa:</b> radio de ' + a.alerta.km + ' km.</p>' : '') +
       '<div class="row"><select id="aKm" class="grow"><option value="0.5">500 m</option><option value="1">1 km</option><option value="2">2 km</option><option value="5">5 km</option></select>' +
       '<button class="btn small" id="aSet">Usar zona del mapa</button>' + (a.alerta ? '<button class="btn sec small" id="aDel">Quitar</button>' : '') + '</div></div>' +
