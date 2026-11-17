@@ -840,7 +840,7 @@
       '<table class="tabla card" style="margin-top:12px;padding:0"><tr><th></th><th>' + esc((pl.gratis || {}).nombre || 'Gratis') + '</th><th style="color:var(--gold)">' + esc((pl.premium || {}).nombre || 'Premium') + '</th></tr>' +
       filas.map((f) => '<tr><td>' + f[0] + '</td><td>' + v(gr[f[1]]) + '</td><td><b>' + v(pr[f[1]]) + '</b></td></tr>').join('') + '</table>' +
       '<div class="card" style="margin-top:12px"><b>Cómo activarlo</b><p class="small muted" style="margin:6px 0 10px">' + esc(Api.texto('pago_instrucciones', '')) + '</p>' +
-      '<button class="btn gold block" id="prComprar"></button><p class="small muted" style="margin:8px 0 0">Paga con link o transferencia y sube la foto del comprobante. Se activa apenas lo revisemos.</p></div>' +
+      '<button class="btn gold block" id="prComprar"></button><p class="small muted" style="margin:8px 0 0">Con Mercado Pago se activa al tiro. Con link o transferencia sube el comprobante y lo revisamos.</p></div>' +
       '<div class="sec-tit">¿Tienes una key?</div><div class="row"><input id="prKey" placeholder="EST-XXXX-XXXX" autocapitalize="characters" class="grow"><button class="btn" id="prCanje">' + ico('key') + ' Activar</button></div>' +
       (modo === 'activo' ? '</div>' : '');
     U.ponerIconos(T);
