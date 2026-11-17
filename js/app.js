@@ -192,6 +192,11 @@
     cargando();
     await Api.ajustes();
     let x;
+    // G98 ⚡ al volver de Mercado Pago (?mp=<id>): la base pregunta a Mercado Pago antes de mostrar la reserva.
+    if (new URLSearchParams(location.search).get('mp') === id) {
+      try { await Api.rpc('arriendo_mp_revisar', { p_id: id }); } catch (e) { /* se reintenta cada 1 min en el servidor */ }
+      history.replaceState(null, '', location.pathname + location.hash);
+    }
     try { x = (await Api.rpc('mis_arriendos')).find((r) => r.id === id); } catch (e) { V.innerHTML = volver() + '<div class="vacio">' + esc(e.message) + '</div>'; return; }
     if (!x) { V.innerHTML = volver() + '<div class="vacio">Reserva no encontrada</div>'; return; }
     const dueno = x.soy_dueno, e = x.est, o = x.otro, r = Api._aj.reglas || {};
@@ -207,8 +212,9 @@
     const b = [];
     if (!dueno && x.estado === 'por_pagar') {
       b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
+(x.mp ? '<button class="btn block ok" data-mp style="margin-top:10px">⚡ Pagar ' + clp(x.monto_pagar) + ' con Mercado Pago</button><p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
         (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted">' + esc(x.pago.texto) + '</p>' : '')
-          : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>') +
+          : (x.mp ? '<p class="small muted">¿Otra forma de pago? Coordínala por el chat y sube el comprobante.</p>' : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>')) +
         '<label>Foto del comprobante</label><input type="file" id="rComp" accept="image/*"><button class="btn block" id="rSubir" style="margin-top:10px">📤 Subir comprobante</button>');
     }
     if (!dueno && x.estado === 'en_revision') b.push('<div class="aviso" style="margin-top:12px">🧾 El dueño está revisando tu comprobante. Te avisaremos apenas responda.</div>');
@@ -228,7 +234,8 @@
       else b.push('<div class="aviso" style="margin-top:12px">' + (x.ext.auto ? '🔁 Renovación del mes: ' : '⏱️ Pediste más tiempo: ') + mas + '. ' + (x.ext.comprobante ? 'Comprobante enviado: esperando al dueño.' : 'Esperando al dueño.') +
         ' <button class="btn small line" id="rExtQuitar" style="margin-left:6px">' + (x.ext.auto ? 'No renovar' : 'Quitar') + '</button></div>' +
         // G84 e: pagar y subir el comprobante de un "más tiempo" que sigue esperando (la renovación mensual llega sin comprobante).
-        ('renovar' in x && !x.ext.comprobante ? (x.ext.pago && x.ext.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.ext.pago.url) + '">💳 Pagar ' + clp(x.ext.monto) + '</a>' : '') +
+        ('renovar' in x && !x.ext.comprobante ? (x.mp ? '<button class="btn block ok" data-mp style="margin-top:10px">⚡ Pagar ' + clp(x.ext.monto) + ' con Mercado Pago</button><p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
+          (x.ext.pago && x.ext.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.ext.pago.url) + '">💳 Pagar ' + clp(x.ext.monto) + '</a>' : '') +
           '<label>Foto del comprobante</label><input type="file" id="rExtComp" accept="image/*"><button class="btn block" id="rExtSubir" style="margin-top:10px">📤 Subir comprobante</button>' : ''));
     } else if (g84 && !dueno && enCurso && x.cantidad < UN[2]) b.push('<button class="btn sec block" id="rExt" style="margin-top:12px">⏱️ Pedir más tiempo</button>');
     // G84 e: 🔁 arriendo mensual que se renueva solo ('renovar' in x = la base ya está actualizada).
@@ -276,6 +283,14 @@
       $('rReloj').textContent = quedan(x.expira_at);
       if (new Date(x.expira_at) < Date.now()) { clearInterval(pollChat); vReserva(id); }
     }, 1000);
+    V.querySelectorAll('[data-mp]').forEach((bt) => bt.onclick = async () => {
+      bt.disabled = true;
+      try {
+        const r = await Api.rpc('arriendo_mp_pagar', { p_id: id, p_volver: location.origin + location.pathname + '?mp=' + id + '#/r/' + id });
+        if (!r || !r.ok) throw new Error((r && r.error) || 'No se pudo abrir Mercado Pago');
+        location.href = r.url;
+      } catch (er) { bt.disabled = false; fallo(er); }
+    });
     if ($('rSubir')) $('rSubir').onclick = async (ev) => {
       const f = $('rComp').files[0]; if (!f) { toast('Elige la foto del comprobante'); return; }
       ev.target.disabled = true; ev.target.textContent = 'Subiendo…';
@@ -695,12 +710,14 @@
     const l = await Api.rpc('mis_links');
     T.innerHTML = '<div class="card"><b>💳 Tus links de pago</b><p class="small muted" style="margin:6px 0 0">Tus arrendatarios pagan con el link <b>activo</b> y suben el comprobante; tú apruebas. ' +
       'Tienes 2 espacios (por ejemplo Mercado Pago y transferencia) y eliges cuál se usa. Si pones un <b>abono</b>, se cobra solo eso para confirmar y el resto se paga al llegar. Solo tú ves estos datos.</p></div>' +
+      '<div class="card" id="lkMp" hidden></div>' +  // G98 ⚡ Mercado Pago propio (núcleo pagos.js)
       l.map((s) => '<div class="card slotpago' + (s.activo ? ' on' : '') + '" data-slot="' + s.slot + '"><div class="row between"><b>Espacio ' + s.slot + '</b>' +
         '<label class="check" style="margin:0"><input type="radio" name="lkAct"' + (s.activo ? ' checked' : '') + '> Activo</label></div>' +
         '<label>Link de pago (Mercado Pago u otro)</label><input class="lkUrl" type="url" placeholder="https://mpago.la/…" value="' + esc(s.url) + '">' +
         '<label>Abono fijo para confirmar (opcional, $)</label><input class="lkMonto" type="number" inputmode="numeric" min="0" step="500" placeholder="Vacío = paga el total" value="' + (s.monto || '') + '">' +
         '<label>Texto o datos de transferencia (opcional)</label><textarea class="lkTxt" maxlength="300" placeholder="Ej: Banco Estado, cuenta RUT 12.345.678-9">' + esc(s.texto) + '</textarea>' +
         '<button class="btn block lkOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
+    if (window.CFX_PAGOS && CFX_PAGOS.mpNegocio) CFX_PAGOS.mpNegocio(T.querySelector('#lkMp'), { rpc: (n, a) => Api.rpc(n, a), para: 'su reserva o el mes', btn: 'btn', btnAlt: 'btn line' });
     T.onclick = async (ev) => {
       const b = ev.target.closest('.lkOk'); if (!b) return;
       const c = b.closest('[data-slot]');
