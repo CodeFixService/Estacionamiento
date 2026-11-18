@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '63') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '64') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1776,8 +1776,9 @@ begin
       'motivo', a.motivo, 'nota', a.nota, 'creado', a.creado, 'soy_dueno', a.dueno = me, 'comprobante', a.comprobante,
       'patente', a.patente, 'devolver_monto', a.devolver_monto, 'renovar', a.renovar,
       'mp', a.arrendatario = me and (a.estado = 'por_pagar' or (a.estado = 'aceptado' and a.ext_cantidad is not null)) and public.cfx_mp_neg_activo(a.dueno),  -- G98 ⚡
+      'medios', case when a.arrendatario = me then public.cfx_mp_neg_medios(a.dueno) end,  -- G107 ⚡ MP / 💳 Flow
       'auto', case when a.modalidad = 'mes' then public.cfx_mp_neg_sub_ver('auto:' || a.id) end,  -- G106 ⚡ pago automático
-      'auto_ok', a.modalidad = 'mes' and a.arrendatario = me and a.estado = 'aceptado' and a.fin > now() and public.cfx_mp_neg_activo(a.dueno),
+      'auto_ok', a.modalidad = 'mes' and a.arrendatario = me and a.estado = 'aceptado' and a.fin > now() and public.cfx_mp_neg_mp(a.dueno),  -- G107: la tarjeta automática es solo con MP
       'ext', case when a.ext_cantidad is not null and a.estado = 'aceptado' then jsonb_build_object('cantidad', a.ext_cantidad, 'monto', a.ext_monto,
         'comprobante', a.ext_comprobante, 'hasta', a.fin + public._unidad(a.modalidad) * a.ext_cantidad, 'auto', a.renovar and a.renovar_para = a.fin,
         'pago', case when a.arrendatario = me then (select jsonb_build_object('url', l.url, 'texto', l.texto) from public.links_pago l
@@ -3117,7 +3118,10 @@ create or replace function public.cfx_pago_volver(p_ref text) returns text
 language plpgsql stable security definer set search_path = '' as $$
 declare r text := lower(left(coalesce(p_ref, ''), 80));
 begin
-  if r !~ '^f:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return null; end if;
+  if r !~ '^[fn]:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return null; end if;
+  if left(r, 1) = 'n' then  -- G107 💳 Flow propio del negocio
+    return (select volver from public.cfx_mp_neg_cobros where id = substr(r, 3)::uuid and medio = 'flow' and created_at > now() - interval '2 days' and volver ~ '^https://[^\s"<>]+$');
+  end if;
   return (select volver from public.cfx_pagos where id = substr(r, 3)::uuid and medio = 'flow' and creado > now() - interval '2 days' and volver ~ '^https://[^\s"<>]+$');
 end $$;
 
@@ -4536,7 +4540,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.accesos', 'public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_neg_sub_pagos', 'public.cfx_mp_neg_subs', 'public.cfx_mp_negocio', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.cierres', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.esperas', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.patentes', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.accesos', 'public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_flow_negocio', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_neg_sub_pagos', 'public.cfx_mp_neg_subs', 'public.cfx_mp_negocio', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.cierres', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.esperas', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.patentes', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -6708,9 +6712,36 @@ language sql stable security definer set search_path = '' as $$
   select n from (select public.cfx_negocio_cuenta(auth.uid()) n) x where n is not null and public.cfx_negocio_dueno(n) = auth.uid()
 $$;
 
-create or replace function public.cfx_mp_neg_activo(p_negocio uuid) returns boolean
+-- G107: "cobro automático" = su ⚡ Mercado Pago O su 💳 Flow (Webpay). cfx_mp_neg_mp = solo Mercado Pago (suscripciones G106).
+create table if not exists public.cfx_flow_negocio (
+  negocio    uuid primary key,
+  apikey     text not null,
+  secret     text not null,
+  sandbox    boolean not null default false,
+  activo     boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.cfx_flow_negocio enable row level security;
+revoke all on public.cfx_flow_negocio from anon, authenticated;
+alter table public.cfx_mp_neg_cobros add column if not exists medio text not null default 'mp';
+alter table public.cfx_mp_neg_cobros add column if not exists volver text;
+
+create or replace function public.cfx_mp_neg_mp(p_negocio uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.cfx_mp_negocio where negocio = p_negocio and activo)
+$$;
+create or replace function public.cfx_flow_neg_on(p_negocio uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.cfx_flow_negocio where negocio = p_negocio and activo)
+$$;
+create or replace function public.cfx_mp_neg_activo(p_negocio uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.cfx_mp_neg_mp(p_negocio) or public.cfx_flow_neg_on(p_negocio)
+$$;
+-- Para la pantalla del cliente: qué botones mostrar.
+create or replace function public.cfx_mp_neg_medios(p_negocio uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('mp', public.cfx_mp_neg_mp(p_negocio), 'flow', public.cfx_flow_neg_on(p_negocio))
 $$;
 
 create or replace function public.cfx_mp_neg_estado() returns jsonb
@@ -6744,10 +6775,14 @@ begin
 end $$;
 
 -- La app pide el cobro (solo desde sus funciones; no se llama directo). Devuelve { ok, url } o { ok: false, error }.
-create or replace function public.cfx_mp_neg_cobro(p_negocio uuid, p_ref text, p_titulo text, p_monto int, p_volver text, p_vence timestamptz default null) returns jsonb
+-- G107: p_medio 'mp' | 'flow' (null = Mercado Pago si está, si no Flow).
+drop function if exists public.cfx_mp_neg_cobro(uuid, text, text, int, text, timestamptz);
+create or replace function public.cfx_mp_neg_cobro(p_negocio uuid, p_ref text, p_titulo text, p_monto int, p_volver text, p_vence timestamptz default null, p_medio text default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare tk text; c public.cfx_mp_neg_cobros; r jsonb; v text := left(coalesce(p_volver, ''), 500);
+        md text := coalesce(p_medio, case when public.cfx_mp_neg_mp(p_negocio) then 'mp' else 'flow' end);
 begin
+  if md = 'flow' then return public.cfx_flow_neg_cobro(p_negocio, p_ref, p_titulo, p_monto, p_volver, p_vence); end if;
   select token into tk from public.cfx_mp_negocio where negocio = p_negocio and activo;
   if tk is null then return jsonb_build_object('ok', false, 'error', 'Este negocio no tiene Mercado Pago activo'); end if;
   if coalesce(p_monto, 0) < 1 then return jsonb_build_object('ok', false, 'error', 'Monto no válido'); end if;
@@ -6779,6 +6814,7 @@ begin
   select * into c from public.cfx_mp_neg_cobros where id = p_id for update skip locked;
   if c.id is null then return false; end if;
   if c.pago is not null then return true; end if;
+  if c.medio = 'flow' then return public.cfx_flow_neg_confirmar(c); end if;  -- G107
   select token into tk from public.cfx_mp_negocio where negocio = c.negocio;
   if tk is null then return false; end if;
   r := public.cfx_mp_api(tk, 'GET', '/v1/payments/search?sort=date_created&criteria=desc&external_reference=' || c.id::text);
@@ -6826,7 +6862,106 @@ begin
   return n;
 end $$;
 
-revoke all on function public.cfx_mp_neg_mio(), public.cfx_mp_neg_activo(uuid), public.cfx_mp_neg_cobro(uuid, text, text, int, text, timestamptz),
+-- ---------------------------------------------------------------------
+-- G107 💳 FLOW PROPIO DE CADA NEGOCIO (Webpay débito/crédito, transferencia y MACH; la plata llega a SU cuenta Flow).
+--   Mismo molde que su Mercado Pago: el dueño pega API Key + Secret Key 1 vez (nadie las lee después). El cobro va en
+--   cfx_mp_neg_cobros (medio 'flow'), se confirma con getStatusByCommerceId (pagado + CLP + monto completo + n° de Flow 1 vez)
+--   al volver, con el aviso de Flow (función ?cfx_mp=n:<id>) y con el cron 'cfx-mp-neg' → mismo gancho cfx_mp_neg_pagado_app.
+--   Flow exige el correo de quien paga: el de la persona con sesión; si no hay (invitado), el del dueño (le llega el recibo).
+-- ---------------------------------------------------------------------
+create or replace function public.cfx_flow_neg_cfg(p_negocio uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('apikey', apikey, 'secret', secret, 'sandbox', sandbox) from public.cfx_flow_negocio where negocio = p_negocio
+$$;
+
+create or replace function public.cfx_flow_neg_cobro(p_negocio uuid, p_ref text, p_titulo text, p_monto int, p_volver text, p_vence timestamptz default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare f jsonb; c public.cfx_mp_neg_cobros; r jsonb; v text := left(coalesce(p_volver, ''), 500); n text; em text;
+begin
+  if not public.cfx_flow_neg_on(p_negocio) then return jsonb_build_object('ok', false, 'error', 'Este negocio no tiene Webpay (Flow) activo'); end if;
+  f := public.cfx_flow_neg_cfg(p_negocio);
+  if coalesce(p_monto, 0) < 350 then return jsonb_build_object('ok', false, 'error', 'Webpay cobra desde $350. Usa otro medio de pago.'); end if;
+  if p_vence is not null and p_vence < now() + interval '1 minute' then return jsonb_build_object('ok', false, 'error', 'Se pasó el tiempo para pagar'); end if;
+  if exists (select 1 from public.cfx_mp_neg_cobros where ref = p_ref and pago is not null) then return jsonb_build_object('ok', false, 'error', 'Esto ya está pagado'); end if;
+  if v !~ '^https://[^\s"<>]+$' then v := null; end if;
+  select email into em from auth.users where id = auth.uid();
+  if coalesce(em, '') !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then select email into em from auth.users where id = public.cfx_negocio_dueno(p_negocio); end if;
+  if coalesce(em, '') !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return jsonb_build_object('ok', false, 'error', 'Falta un correo para Webpay. Usa otro medio de pago.'); end if;
+  insert into public.cfx_mp_neg_cobros (negocio, ref, titulo, monto, vence, medio, volver)
+  values (p_negocio, left(p_ref, 120), left(coalesce(p_titulo, 'Pago'), 120), p_monto, p_vence, 'flow', v) returning * into c;
+  n := public.cfx_mp_notif('n:' || c.id::text) ->> 'notification_url';
+  if n is null and v is null then
+    delete from public.cfx_mp_neg_cobros where id = c.id;
+    return jsonb_build_object('ok', false, 'error', 'Webpay no está listo en esta app. Usa otro medio de pago.');
+  end if;
+  r := public.cfx_flow_api('POST', '/payment/create', jsonb_build_object('commerceOrder', c.id::text, 'subject', c.titulo,
+    'currency', 'CLP', 'amount', c.monto::text, 'email', lower(em), 'paymentMethod', '9',
+    'urlConfirmation', coalesce(n, v), 'urlReturn', coalesce(n || '&cfx_volver=1', v))
+    || case when p_vence is null then '{}'::jsonb else jsonb_build_object('timeout', greatest(120, least(86400, extract(epoch from p_vence - now())::int))::text) end, f);
+  if coalesce((r ->> 'status')::int, 0) <> 200 or coalesce(r #>> '{body,url}', '') !~ '^https://' or coalesce(r #>> '{body,token}', '') = '' then
+    delete from public.cfx_mp_neg_cobros where id = c.id;
+    return jsonb_build_object('ok', false, 'error', 'Webpay (Flow) no respondió. Intenta de nuevo o usa otro medio de pago.');
+  end if;
+  return jsonb_build_object('ok', true, 'url', (r #>> '{body,url}') || '?token=' || public.cfx_url_cod(r #>> '{body,token}'));
+end $$;
+
+create or replace function public.cfx_flow_neg_confirmar(c public.cfx_mp_neg_cobros) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare f jsonb := public.cfx_flow_neg_cfg(c.negocio); r jsonb; b jsonb; nro text;
+begin
+  if f is null then return false; end if;
+  r := public.cfx_flow_api('GET', '/payment/getStatusByCommerceId', jsonb_build_object('commerceId', c.id::text), f);
+  b := r -> 'body';
+  if coalesce((r ->> 'status')::int, 0) <> 200 or b is null or coalesce((b ->> 'status')::int, 0) <> 2 or b ->> 'commerceOrder' is distinct from c.id::text
+     or coalesce(b ->> 'currency', 'CLP') <> 'CLP' or coalesce((b ->> 'amount')::numeric, 0) < c.monto or coalesce(b ->> 'flowOrder', '') = '' then return false; end if;
+  nro := 'flow:' || left(b ->> 'flowOrder', 34);
+  if exists (select 1 from public.cfx_mp_neg_cobros u where u.pago = nro) then return false; end if;
+  update public.cfx_mp_neg_cobros set pago = nro, pagado_at = now() where id = c.id;
+  if to_regprocedure('public.cfx_mp_neg_pagado_app(text, text, integer)') is not null then
+    execute 'select public.cfx_mp_neg_pagado_app($1, $2, $3)' using c.ref, nro, c.monto;
+  end if;
+  return true;
+end $$;
+
+create or replace function public.cfx_flow_neg_estado() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('dueno', n is not null, 'conectado', f.negocio is not null, 'activo', coalesce(f.activo, false), 'sandbox', coalesce(f.sandbox, false), 'fin', right(f.apikey, 4))
+  from (select public.cfx_mp_neg_mio() n) x left join public.cfx_flow_negocio f on f.negocio = x.n
+$$;
+
+-- El dueño conecta (llaves), activa/pausa (p_activo) o desconecta (sin llaves y p_activo null).
+create or replace function public.cfx_flow_neg_guardar(p_apikey text, p_secret text, p_activo boolean, p_sandbox boolean default false) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare n uuid := public.cfx_mp_neg_mio(); k text := nullif(regexp_replace(coalesce(p_apikey, ''), '\s', '', 'g'), '');
+        sc text := nullif(regexp_replace(coalesce(p_secret, ''), '\s', '', 'g'), ''); r jsonb;
+begin
+  if n is null then raise exception 'Solo el dueño del negocio'; end if;
+  if k is null and sc is null then
+    if p_activo is null then delete from public.cfx_flow_negocio where negocio = n;
+    else
+      update public.cfx_flow_negocio set activo = p_activo, updated_at = now() where negocio = n;
+      if not found and p_activo then raise exception 'Pega tu API Key y tu Secret Key de Flow'; end if;
+    end if;
+    return public.cfx_flow_neg_estado();
+  end if;
+  if k is null or sc is null then raise exception 'Pega las 2 llaves: API Key y Secret Key'; end if;
+  if k !~ '^[A-Za-z0-9-]{20,80}$' then raise exception 'Esa no parece una API Key de Flow (Integración → API Keys)'; end if;
+  if sc !~ '^[A-Za-z0-9]{20,100}$' then raise exception 'Esa no parece una Secret Key de Flow'; end if;
+  r := public.cfx_flow_api('GET', '/payment/getStatusByCommerceId', jsonb_build_object('commerceId', 'cfx-prueba'),
+    jsonb_build_object('apikey', k, 'secret', sc, 'sandbox', coalesce(p_sandbox, false)));
+  if coalesce((r ->> 'status')::int, 0) = 0 then raise exception 'No se pudo conectar con Flow. Intenta de nuevo.'; end if;
+  if (r ->> 'status')::int in (401, 403) then raise exception 'Flow no aceptó las llaves: cópialas de nuevo (¿son de producción o de pruebas?)'; end if;
+  insert into public.cfx_flow_negocio (negocio, apikey, secret, sandbox, activo) values (n, k, sc, coalesce(p_sandbox, false), coalesce(p_activo, true))
+  on conflict (negocio) do update set apikey = excluded.apikey, secret = excluded.secret, sandbox = excluded.sandbox, activo = excluded.activo, updated_at = now();
+  return public.cfx_flow_neg_estado();
+end $$;
+
+revoke all on function public.cfx_flow_neg_cfg(uuid), public.cfx_flow_neg_cobro(uuid, text, text, int, text, timestamptz), public.cfx_flow_neg_confirmar(public.cfx_mp_neg_cobros) from public, anon, authenticated;
+revoke all on function public.cfx_flow_neg_estado(), public.cfx_flow_neg_guardar(text, text, boolean, boolean) from public, anon;
+grant execute on function public.cfx_flow_neg_estado(), public.cfx_flow_neg_guardar(text, text, boolean, boolean) to authenticated;
+
+revoke all on function public.cfx_mp_neg_mio(), public.cfx_mp_neg_activo(uuid), public.cfx_mp_neg_cobro(uuid, text, text, int, text, timestamptz, text),
+  public.cfx_mp_neg_mp(uuid), public.cfx_flow_neg_on(uuid), public.cfx_mp_neg_medios(uuid),
   public.cfx_mp_neg_confirmar(uuid), public.cfx_mp_neg_revisar(text), public.cfx_mp_neg_pagado(text), public.cfx_mp_neg_revisar_pendientes() from public, anon, authenticated;
 revoke all on function public.cfx_mp_neg_estado(), public.cfx_mp_neg_guardar(text, boolean) from public, anon;
 grant execute on function public.cfx_mp_neg_estado(), public.cfx_mp_neg_guardar(text, boolean) to authenticated;
@@ -7341,20 +7476,22 @@ end $$;
 create or replace function public._mp_ref_ext(a public.arriendos) returns text
 language sql immutable as $$ select 'ext:' || a.id || ':' || floor(extract(epoch from a.ext_at))::bigint $$;
 
-create or replace function public.arriendo_mp_pagar(p_id uuid, p_volver text) returns jsonb
+-- G107: p_medio 'mp' | 'flow' (💳 Webpay con el Flow del dueño); null = el que tenga.
+drop function if exists public.arriendo_mp_pagar(uuid, text);
+create or replace function public.arriendo_mp_pagar(p_id uuid, p_volver text, p_medio text default null) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare yo public.perfiles := public._yo(); a public.arriendos; t text; x jsonb;
+declare yo public.perfiles := public._yo(); a public.arriendos; t text; x jsonb; md text := case when p_medio in ('mp', 'flow') then p_medio end;
 begin
   perform public.liberar_vencidas();
   select * into a from public.arriendos where id = p_id;
   if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
   select titulo into t from public.estacionamientos where id = a.estacionamiento;
   if a.estado = 'por_pagar' and a.monto_pagar > 0 then
-    x := public.cfx_mp_neg_cobro(a.dueno, 'arriendo:' || a.id, left('Estacionamiento ' || coalesce(t, ''), 120), a.monto_pagar, p_volver, a.expira_at);
+    x := public.cfx_mp_neg_cobro(a.dueno, 'arriendo:' || a.id, left('Estacionamiento ' || coalesce(t, ''), 120), a.monto_pagar, p_volver, a.expira_at, md);
     if (x ->> 'ok')::boolean then update public.arriendos set mp_desde = coalesce(mp_desde, now()) where id = a.id; end if;
     return x;
   elsif a.estado = 'aceptado' and a.ext_cantidad is not null and coalesce(a.ext_monto, 0) > 0 then
-    return public.cfx_mp_neg_cobro(a.dueno, public._mp_ref_ext(a), left('Más tiempo · ' || coalesce(t, ''), 120), a.ext_monto, p_volver, a.fin + interval '1 day');
+    return public.cfx_mp_neg_cobro(a.dueno, public._mp_ref_ext(a), left('Más tiempo · ' || coalesce(t, ''), 120), a.ext_monto, p_volver, a.fin + interval '1 day', md);
   end if;
   return jsonb_build_object('ok', false, 'error', 'Esta reserva no tiene nada por pagar');
 end $$;
@@ -7395,14 +7532,14 @@ begin
   exception when others then ok := false;
   end;
   perform set_config('request.jwt.claim.sub', coalesce(prev, ''), true);
-  perform public._notificar(a.dueno, case when ok then '⚡ Pagado con Mercado Pago' else '⚡ Pago recibido: revísalo' end,
+  perform public._notificar(a.dueno, case when ok then case when p_pago like 'flow:%' then '💳 Pagado con Webpay' else '⚡ Pagado con Mercado Pago' end else '⚡ Pago recibido: revísalo' end,
     '$' || replace(to_char(p_monto, 'FM999G999G999'), ',', '.') || ' por "' || coalesce(t, '') || '"' ||
     case when ok then ': quedó confirmado solo' else ': no se pudo confirmar solo (horario ocupado o reserva cerrada). Acepta o devuélvelo' end, '#/r/' || a.id);
 end $$;
 
 revoke execute on function public._mp_ref_ext(public.arriendos), public.cfx_mp_neg_pagado_app(text, text, int) from public, anon, authenticated;
-revoke execute on function public.arriendo_mp_pagar(uuid, text), public.arriendo_mp_revisar(uuid) from public, anon;
-grant execute on function public.arriendo_mp_pagar(uuid, text), public.arriendo_mp_revisar(uuid) to authenticated;
+revoke execute on function public.arriendo_mp_pagar(uuid, text, text), public.arriendo_mp_revisar(uuid) from public, anon;
+grant execute on function public.arriendo_mp_pagar(uuid, text, text), public.arriendo_mp_revisar(uuid) to authenticated;
 
 -- G106 ⚡ PAGO AUTOMÁTICO DEL ARRIENDO MENSUAL (núcleo: suscripción de Mercado Pago con el MP del dueño, ref 'auto:<id>').
 --   Quien arrienda autoriza su tarjeta 1 vez → MP cobra solo cada mes (2 días antes de terminar) → cada cobro suma +1 mes solo.
@@ -7422,7 +7559,7 @@ begin
   if not found or a.arrendatario <> yo.id then raise exception 'Reserva no encontrada'; end if;
   if a.modalidad <> 'mes' then raise exception 'Solo los arriendos por mes se pagan solos'; end if;
   if a.estado <> 'aceptado' or a.fin <= now() then raise exception 'Solo en una reserva confirmada y vigente'; end if;
-  if not public.cfx_mp_neg_activo(a.dueno) then raise exception 'El dueño no tiene ⚡ Mercado Pago conectado'; end if;
+  if not public.cfx_mp_neg_mp(a.dueno) then raise exception 'El dueño no tiene ⚡ Mercado Pago conectado'; end if;
   select titulo into t from public.estacionamientos where id = a.estacionamiento;
   m := round(a.total::numeric / greatest(a.cantidad, 1))::int;
   if not a.renovar then update public.arriendos set renovar = true, renovar_para = null, actualizado = now() where id = a.id; end if;

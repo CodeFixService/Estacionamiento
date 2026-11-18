@@ -222,6 +222,10 @@
   }
 
   /* ======================= Una reserva ======================= */
+  // G107 ⚡ Mercado Pago y/o 💳 Webpay (Flow) del dueño. Base vieja sin 'medios' = solo MP.
+  const mpBotones = (x, m) => { const md = x.medios || { mp: true };
+    return (md.mp ? '<button class="btn block ok" data-mp="mp" style="margin-top:10px">⚡ Pagar ' + clp(m) + ' con Mercado Pago</button>' : '') +
+      (md.flow ? '<button class="btn block ok" data-mp="flow" style="margin-top:10px">💳 Pagar ' + clp(m) + ' con Webpay</button>' : ''); };
   async function vReserva(id) {
     cargando();
     await Api.ajustes();
@@ -251,7 +255,7 @@
     const b = [];
     if (!dueno && x.estado === 'por_pagar') {
       b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
-(x.mp ? '<button class="btn block ok" data-mp style="margin-top:10px">⚡ Pagar ' + clp(x.monto_pagar) + ' con Mercado Pago</button><p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
+(x.mp ? mpBotones(x, x.monto_pagar) + '<p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
         (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted">' + esc(x.pago.texto) + '</p>' : '')
           : (x.mp ? '<p class="small muted">¿Otra forma de pago? Coordínala por el chat y sube el comprobante.</p>' : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>')) +
         '<label>Foto del comprobante</label><input type="file" id="rComp" accept="image/*"><button class="btn block" id="rSubir" style="margin-top:10px">📤 Subir comprobante</button>');
@@ -273,7 +277,7 @@
       else b.push('<div class="aviso" style="margin-top:12px">' + (x.ext.auto ? '🔁 Renovación del mes: ' : '⏱️ Pediste más tiempo: ') + mas + '. ' + (x.ext.comprobante ? 'Comprobante enviado: esperando al dueño.' : 'Esperando al dueño.') +
         ' <button class="btn small line" id="rExtQuitar" style="margin-left:6px">' + (x.ext.auto ? 'No renovar' : 'Quitar') + '</button></div>' +
         // G84 e: pagar y subir el comprobante de un "más tiempo" que sigue esperando (la renovación mensual llega sin comprobante).
-        ('renovar' in x && !x.ext.comprobante ? (x.mp ? '<button class="btn block ok" data-mp style="margin-top:10px">⚡ Pagar ' + clp(x.ext.monto) + ' con Mercado Pago</button><p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
+        ('renovar' in x && !x.ext.comprobante ? (x.mp ? mpBotones(x, x.ext.monto) + '<p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
           (x.ext.pago && x.ext.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.ext.pago.url) + '">💳 Pagar ' + clp(x.ext.monto) + '</a>' : '') +
           '<label>Foto del comprobante</label><input type="file" id="rExtComp" accept="image/*"><button class="btn block" id="rExtSubir" style="margin-top:10px">📤 Subir comprobante</button>' : ''));
     } else if (g84 && !dueno && enCurso && x.cantidad < UN[2]) b.push('<button class="btn sec block" id="rExt" style="margin-top:12px">⏱️ Pedir más tiempo</button>');
@@ -336,8 +340,8 @@
     V.querySelectorAll('[data-mp]').forEach((bt) => bt.onclick = async () => {
       bt.disabled = true;
       try {
-        const r = await Api.rpc('arriendo_mp_pagar', { p_id: id, p_volver: location.origin + location.pathname + '?mp=' + id + '#/r/' + id });
-        if (!r || !r.ok) throw new Error((r && r.error) || 'No se pudo abrir Mercado Pago');
+        const r = await Api.rpc('arriendo_mp_pagar', { p_id: id, p_volver: location.origin + location.pathname + '?mp=' + id + '#/r/' + id, ...(bt.dataset.mp === 'flow' ? { p_medio: 'flow' } : {}) });
+        if (!r || !r.ok) throw new Error((r && r.error) || 'No se pudo abrir el pago');
         location.href = r.url;
       } catch (er) { bt.disabled = false; fallo(er); }
     });
