@@ -231,6 +231,11 @@
       try { await Api.rpc('arriendo_mp_revisar', { p_id: id }); } catch (e) { /* se reintenta cada 1 min en el servidor */ }
       history.replaceState(null, '', location.pathname + location.hash);
     }
+    // G106 ⚡ al volver de autorizar el pago automático (?mpa=<id>).
+    if (new URLSearchParams(location.search).get('mpa') === id) {
+      try { await Api.rpc('arriendo_mp_auto_revisar', { p_id: id }); } catch (e) { /* el servidor revisa cada 1 min */ }
+      history.replaceState(null, '', location.pathname + location.hash);
+    }
     try { x = (await Api.rpc('mis_arriendos')).find((r) => r.id === id); } catch (e) { V.innerHTML = volver() + '<div class="vacio">' + esc(e.message) + '</div>'; return; }
     if (!x) { V.innerHTML = volver() + '<div class="vacio">Reserva no encontrada</div>'; return; }
     const dueno = x.soy_dueno, e = x.est, o = x.otro, r = Api._aj.reglas || {};
@@ -276,7 +281,18 @@
     if ('renovar' in x && x.modalidad === 'mes' && enCurso) {
       if (dueno) { if (x.renovar) b.push('<div class="aviso" style="margin-top:12px">🔁 Se renueva cada mes: 5 días antes te llega el pedido para aceptarlo.</div>'); }
       else b.push('<div class="card" style="margin-top:12px"><div class="row between"><b>🔁 Renovar cada mes</b><button class="btn small ' + (x.renovar ? 'line' : '') + '" id="rRenovar">' + (x.renovar ? 'Apagar' : 'Prender') + '</button></div>' +
-        '<p class="small muted" style="margin:6px 0 0">' + (x.renovar ? 'Prendido: 5 días antes de terminar te avisamos para pagar el mes siguiente.' : 'Apagado: el arriendo termina el ' + esc(fh(x.fin)) + '.') + '</p></div>');
+        '<p class="small muted" style="margin:6px 0 0">' + (x.renovar ? (x.auto && x.auto.estado === 'activa' ? 'Prendido: se paga solo con tu tarjeta (⚡ abajo).' : 'Prendido: 5 días antes de terminar te avisamos para pagar el mes siguiente.') : 'Apagado: el arriendo termina el ' + esc(fh(x.fin)) + '.') + '</p></div>');
+    }
+    // G106 ⚡ pago automático con tarjeta ('auto' in x = la base ya está actualizada).
+    if ('auto' in x && x.modalidad === 'mes' && enCurso) {
+      const au = x.auto, mes = Math.round(x.total / Math.max(x.cantidad, 1));
+      if (dueno) { if (au && au.estado === 'activa') b.push('<div class="aviso" style="margin-top:12px">⚡ Se paga solo cada mes con tarjeta: ' + clp(au.monto) + ' a tu Mercado Pago.</div>'); }
+      else if (au && (au.estado === 'activa' || au.estado === 'pausada')) b.push('<div class="card" id="rAuto" style="margin-top:12px"><div class="row between"><b>⚡ Pago automático</b><button class="btn small line" id="rAutoNo">Quitar</button></div>' +
+        '<p class="small muted" style="margin:6px 0 0">' + (au.estado === 'activa' ? '✅ Activo: Mercado Pago cobra ' + clp(au.monto) + ' a tu tarjeta cada mes y tu arriendo se renueva solo.' : '⏸️ Pausado en tu Mercado Pago: este mes se paga como antes.') + '</p></div>');
+      else if (x.auto_ok) b.push('<div class="card" id="rAuto" style="margin-top:12px"><b>⚡ Pagar solo cada mes</b>' +
+        '<p class="small muted" style="margin:6px 0 10px">Autoriza tu tarjeta 1 vez en Mercado Pago: cada mes se cobra ' + clp(mes) + ' y tu arriendo se renueva sin hacer nada. Lo quitas cuando quieras.</p>' +
+        (au && au.estado === 'pendiente' ? '<p class="small" style="margin:0 0 8px">⏳ Falta autorizar en Mercado Pago.</p>' : '') +
+        '<button class="btn block ok" id="rAutoSi">⚡ Activar pago automático</button></div>');
     }
     const acc = [];
     if (['pendiente', 'por_pagar', 'en_revision', 'aceptado'].includes(x.estado)) acc.push('<button class="btn line grow" id="rCancelar">Cancelar reserva</button>');
@@ -340,6 +356,18 @@
     if ($('rExtImg')) U.urlPrivada(x.ext.comprobante).then((u) => { $('rExtImg').src = u; $('rExtImg').onclick = () => window.open(u, '_blank'); });
     if ($('rExtSi')) $('rExtSi').onclick = () => hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: true }), 'Listo: tiene más tiempo ✅');
     if ($('rExtNo')) $('rExtNo').onclick = async () => { if (await confirmar('¿Rechazar el tiempo extra? La reserva termina a la hora acordada.', 'Rechazar', true)) hacer(() => Api.rpc('responder_extension', { p_id: id, p_aceptar: false }), 'Rechazado'); };
+    if ($('rAutoSi')) $('rAutoSi').onclick = async (ev) => {
+      const D = window.CFX_DIALOGO;
+      const m = D ? await D.pedir('Correo de tu cuenta de Mercado Pago (la que usarás para pagar):', (Api.cuenta && Api.cuenta.email) || '', { tipo: 'email', si: 'Seguir' }) : (Api.cuenta && Api.cuenta.email);
+      if (!m) return;
+      ev.target.disabled = true;
+      try {
+        const r = await Api.rpc('arriendo_mp_auto', { p_id: id, p_email: m, p_volver: location.origin + location.pathname + '?mpa=' + id + '#/r/' + id });
+        if (!r || !r.ok) throw new Error((r && r.error) || 'No se pudo abrir Mercado Pago');
+        location.href = r.url;
+      } catch (er) { ev.target.disabled = false; fallo(er); }
+    };
+    if ($('rAutoNo')) $('rAutoNo').onclick = async () => { if (await confirmar('¿Quitar el pago automático? Tu arriendo sigue y el mes siguiente lo pagas como antes.', 'Quitar', true)) hacer(() => Api.rpc('arriendo_mp_auto_quitar', { p_id: id }), 'Pago automático apagado'); };
     if ($('rRenovar')) $('rRenovar').onclick = () => hacer(() => Api.rpc('renovar_arriendo', { p_id: id, p_si: !x.renovar }), x.renovar ? 'Ya no se renueva' : 'Listo: se renueva cada mes 🔁');
     if ($('rExtSubir')) $('rExtSubir').onclick = async (ev) => {
       const f = $('rExtComp').files[0]; if (!f) return toast('Elige la foto del comprobante');
