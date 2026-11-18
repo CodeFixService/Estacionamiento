@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '60') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '61') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1147,6 +1147,7 @@ begin
     'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'vehiculo', e.vehiculo, 'techado', e.techado,
     'acceso24', e.acceso24, 'seguridad', e.seguridad, 'carga', e.carga, 'camara', e.camara, 'porton', e.porton, 'fotos', to_jsonb(e.fotos), 'estado', e.estado,
     'desc', case when to_regprocedure('public._descuento(public.estacionamientos,integer)') is not null and public._descuento(e, 100000) > 0 then jsonb_build_object('pct', e.desc_pct, 'desde', e.desc_desde) end,
+    'g104', case when to_regprocedure('public._g104_ficha(public.estacionamientos,uuid)') is not null then public._g104_ficha(e, me) end,
     'visible', coalesce(visible, false), 'reservable', public._reservable(e), 'creado', e.creado, 'mio', e.dueno = me, 'logueado', me is not null,
     'vistas', case when e.dueno = me or coalesce(yo.es_admin, false) then e.vistas end,
     'favorito', me is not null and exists (select 1 from public.favoritos f where f.usuario = me and f.estacionamiento = p_id),
@@ -1390,9 +1391,16 @@ begin
       and tstzrange(a.inicio, a.fin + public._unidad(a.modalidad) * coalesce(a.ext_cantidad, 0)) && tstzrange(p_inicio, v_fin)) then
     raise exception 'Ese horario ya está reservado. Elige otro.';
   end if;
+  -- G104 📅 días cerrados por el dueño (módulo)
+  if to_regprocedure('public._cierre_choca(public.estacionamientos,timestamptz,timestamptz)') is not null then perform public._cierre_choca(e, p_inicio, v_fin); end if;
   v_total := precio * p_cantidad;
-  -- G94 🏷️ descuento por estadía larga (módulo del dueño)
-  if to_regprocedure('public._descuento(public.estacionamientos,integer)') is not null then v_total := round(v_total * (100 - public._descuento(e, p_cantidad)) / 100.0)::int; end if;
+  -- G104 🌙 tarifa fin de semana / nocturna (módulo del dueño)
+  if to_regprocedure('public._tarifa_total(public.estacionamientos,text,timestamptz,integer,integer)') is not null then v_total := public._tarifa_total(e, p_modalidad, p_inicio, p_cantidad, precio); end if;
+  -- G94 🏷️ descuento por estadía larga · G104 🔁 premio a cliente frecuente: se aplica el MAYOR de los dos (no se suman)
+  if to_regprocedure('public._descuento(public.estacionamientos,integer)') is not null then
+    v_total := round(v_total * (100 - greatest(public._descuento(e, p_cantidad),
+      case when to_regprocedure('public._desc_frecuente(public.estacionamientos,uuid)') is not null then public._desc_frecuente(e, yo.id) else 0 end)) / 100.0)::int;
+  end if;
   select * into lk from public.links_pago where dueno = e.dueno and tipo = 'arriendo' and activo order by slot limit 1;
   -- Si el dueño fijó un abono, se paga eso para confirmar (el resto se paga al llegar).
   v_pagar := case when coalesce(lk.monto, 0) > 0 then least(lk.monto, v_total) else v_total end;
@@ -1817,7 +1825,7 @@ declare yo public.perfiles := public._yo(); st boolean := public._puede(yo, 'est
 begin
   return coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'comuna', e.comuna, 'foto', e.fotos[1],
       'estado', e.estado, 'ph', e.precio_hora, 'pd', e.precio_dia, 'pm', e.precio_mes, 'visible', r.n <= lim,
-      'desc_pct', to_jsonb(e) -> 'desc_pct', 'desc_desde', to_jsonb(e) -> 'desc_desde',
+      'desc_pct', to_jsonb(e) -> 'desc_pct', 'desc_desde', to_jsonb(e) -> 'desc_desde', 'finde_pct', to_jsonb(e) -> 'finde_pct', 'noche_pct', to_jsonb(e) -> 'noche_pct',
       'stats', case when st then jsonb_build_object('vistas', e.vistas,
         'favoritos', (select count(*) from public.favoritos f where f.estacionamiento = e.id),
         'solicitudes', (select count(*) from public.arriendos a where a.estacionamiento = e.id)) end) order by e.creado)
@@ -4512,7 +4520,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.accesos', 'public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_negocio', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.patentes', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.accesos', 'public.ajustes', 'public.arriendos', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_negocio', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.cierres', 'public.config', 'public.conversaciones', 'public.denuncias', 'public.esperas', 'public.estacionamientos', 'public.favoritos', 'public.licencias', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.patentes', 'public.perfiles', 'public.planes', 'public.por_borrar', 'public.push_subs', 'public.textos', 'public.verificaciones'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -4837,7 +4845,16 @@ language sql immutable as $$
          -- G101: 🛒 Mercado Libre (Despega).
          ('mercadolibre', '🛒 Mercado Libre', 'Une tus productos con tus publicaciones de Mercado Libre: vendes allá y se descuenta aquí; cambias el stock aquí y se actualiza allá.'),
          -- G102: 🚚 Courier Chilexpress (Despega).
-         ('courier', '🚚 Courier Chilexpress', 'Cotiza el envío y saca la etiqueta de Chilexpress desde el pedido: el código de seguimiento le llega solo a tu cliente.')
+         ('courier', '🚚 Courier Chilexpress', 'Cotiza el envío y saca la etiqueta de Chilexpress desde el pedido: el código de seguimiento le llega solo a tu cliente.'),
+         -- G104: más módulos de cobranza (Billetera).
+         ('cuentas_pagar', '📤 Cuentas por pagar', 'Lo que debes a tus proveedores con su vencimiento: te avisamos antes y al pagar queda como gasto en tu caja.'),
+         ('cierre_caja', '💵 Cierre de caja', 'Al cerrar cuentas el efectivo y ves al tiro si cuadra, sobra o falta. Queda el historial de cada día.'),
+         ('aviso_vence', '🔔 Aviso de vencimiento automático', 'El día antes y el día que vence, a tu cliente le llega el aviso en su celular con su saldo y link para pagar. Solo, respetando la ley.'),
+         -- G104: más módulos de estacionamientos (Estaciona).
+         ('tarifas', '🌙 Tarifa fin de semana y noche', 'Cobra distinto el sábado, domingo y de noche: un % más (o menos) que se calcula solo al reservar.'),
+         ('frecuentes', '🔁 Clientes frecuentes', 'Ve quién te arrienda más y prémialo solo: un % menos desde su reserva número N. Vuelven siempre.'),
+         ('calendario', '📅 Cerrar fechas', 'Cierra días por vacaciones o uso propio: nadie puede reservar esas fechas y la ficha lo muestra.'),
+         ('avisame', '🔔 Lista de espera', 'Si tu lugar está ocupado, la gente se anota y le avisamos apenas lo marques disponible: no pierdes al próximo cliente.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
@@ -6823,7 +6840,7 @@ end $$;
 create or replace function public.cfx_es_premium(n uuid) returns boolean
 language sql stable security definer set search_path = public as $$ select coalesce((select public._premium(p) from public.perfiles p where p.id = n), false) $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['destacar', 'acceso', 'descuentos', 'ganancias'] $$;
+language sql immutable as $$ select array['destacar', 'acceso', 'descuentos', 'ganancias', 'tarifas', 'frecuentes', 'calendario', 'avisame'] $$;
 revoke all on function public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 update public.cfx_config set valor = jsonb_set(valor, '{packs}', jsonb_build_object(
     'basico',   jsonb_build_object('nombre', '🌱 Más reservas', 'detalle', 'Destacado en el mapa y descuento por estadía larga', 'precio', 1490, 'modulos', jsonb_build_array('destacar', 'descuentos')),
@@ -6923,6 +6940,175 @@ end $$;
 revoke all on function public.mis_modulos(), public._modulo_o_error(text), public._destaca(public.perfiles), public._descuento(public.estacionamientos, int), public.descuento_guardar(uuid, int, int),
   public.pase_arriendo(uuid), public.acceso_validar(text, text), public.ganancias() from public, anon, authenticated;
 grant execute on function public.mis_modulos(), public.descuento_guardar(uuid, int, int), public.pase_arriendo(uuid), public.acceso_validar(text, text), public.ganancias() to authenticated;
+
+-- =====================================================================
+-- G104 · 🧩 4 módulos más: 🌙 tarifas · 🔁 frecuentes · 📅 calendario · 🔔 avisame. Precios y reglas SIEMPRE en el servidor (solicitar_arriendo).
+-- 🌙 Tarifa fin de semana y nocturna: % más (o menos) por cada hora/día que cae en sábado-domingo y por cada hora entre 20:00 y 07:00.
+alter table public.estacionamientos add column if not exists finde_pct int not null default 0 check (finde_pct between -50 and 100);
+alter table public.estacionamientos add column if not exists noche_pct int not null default 0 check (noche_pct between -50 and 100);
+create or replace function public._tarifa_total(e public.estacionamientos, p_mod text, p_ini timestamptz, p_cant int, p_precio int) returns int
+language plpgsql stable security definer set search_path = public as $$
+declare t numeric := 0; i int; l timestamp; f int := coalesce(e.finde_pct, 0); n int := coalesce(e.noche_pct, 0); pct int;
+begin
+  if p_mod not in ('hora', 'dia') or (f = 0 and n = 0) or not public.cfx_modulo_de('tarifas', e.dueno) then return p_precio * p_cant; end if;
+  for i in 0 .. p_cant - 1 loop
+    l := (p_ini + case when p_mod = 'hora' then make_interval(hours => i) else make_interval(days => i) end) at time zone 'America/Santiago';
+    pct := 0;
+    if extract(isodow from l) in (6, 7) then pct := pct + f; end if;
+    if p_mod = 'hora' and (extract(hour from l) >= 20 or extract(hour from l) < 7) then pct := pct + n; end if;
+    t := t + p_precio * (100 + greatest(pct, -90)) / 100.0;
+  end loop;
+  return round(t)::int;
+end $$;
+create or replace function public.tarifa_guardar(p_id uuid, p_finde int, p_noche int) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._modulo_o_error('tarifas');
+  if coalesce(p_finde, -999) not between -50 and 100 or coalesce(p_noche, -999) not between -50 and 100 then raise exception 'Cada %% va de -50 a 100'; end if;
+  update public.estacionamientos set finde_pct = p_finde, noche_pct = p_noche where id = p_id and dueno = auth.uid();
+  if not found then raise exception 'Estacionamiento no encontrado'; end if;
+end $$;
+
+-- 🔁 Clientes frecuentes: lista de quienes más te arriendan + premio automático (x %% menos desde su reserva N con este dueño).
+alter table public.perfiles add column if not exists frec_pct int not null default 0 check (frec_pct between 0 and 30);
+alter table public.perfiles add column if not exists frec_desde int not null default 3 check (frec_desde between 2 and 20);
+create or replace function public._desc_frecuente(e public.estacionamientos, p_quien uuid) returns int language plpgsql stable security definer set search_path = public as $$
+declare d public.perfiles;
+begin
+  select * into d from public.perfiles where id = e.dueno;
+  if coalesce(d.frec_pct, 0) <= 0 or p_quien is null or not public.cfx_modulo_de('frecuentes', e.dueno) then return 0; end if;
+  if (select count(*) from public.arriendos where dueno = e.dueno and arrendatario = p_quien and estado in ('aceptado', 'finalizado')) + 1 < d.frec_desde then return 0; end if;
+  return d.frec_pct;
+end $$;
+create or replace function public.frecuentes() returns jsonb language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  perform public._modulo_o_error('frecuentes');
+  return jsonb_build_object('pct', (select frec_pct from public.perfiles where id = me), 'desde', (select frec_desde from public.perfiles where id = me),
+    'lista', coalesce((select jsonb_agg(jsonb_build_object('id', q.arrendatario, 'nombre', p.nombre, 'reservas', q.n, 'total', q.t, 'ultima', q.u) order by q.n desc, q.u desc)
+      from (select arrendatario, count(*) n, sum(total) t, max(inicio) u from public.arriendos where dueno = me and estado in ('aceptado', 'finalizado')
+            group by arrendatario order by count(*) desc, max(inicio) desc limit 100) q join public.perfiles p on p.id = q.arrendatario), '[]'));
+end $$;
+create or replace function public.frecuentes_guardar(p_pct int, p_desde int) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._modulo_o_error('frecuentes');
+  if coalesce(p_pct, -1) not between 0 and 30 then raise exception 'El premio va de 0 a 30 %%'; end if;
+  if coalesce(p_desde, -1) not between 2 and 20 then raise exception 'Desde la reserva 2 a la 20'; end if;
+  update public.perfiles set frec_pct = p_pct, frec_desde = p_desde where id = auth.uid();
+end $$;
+
+-- 📅 Cerrar fechas (vacaciones, uso propio): nadie puede reservar esos días.
+create table if not exists public.cierres (
+  id uuid primary key default gen_random_uuid(),
+  estacionamiento uuid not null references public.estacionamientos (id) on delete cascade,
+  desde date not null,
+  hasta date not null,
+  motivo text not null default '' check (char_length(motivo) <= 80),
+  creado timestamptz not null default now(),
+  check (hasta >= desde and hasta - desde <= 366)
+);
+create index if not exists cierres_est on public.cierres (estacionamiento, hasta);
+alter table public.cierres enable row level security;
+revoke all on public.cierres from anon, authenticated;
+-- Error si la reserva cae en días cerrados (solo si el dueño tiene el módulo).
+create or replace function public._cierre_choca(e public.estacionamientos, p_ini timestamptz, p_fin timestamptz) returns void language plpgsql stable security definer set search_path = public as $$
+declare c public.cierres;
+begin
+  if not public.cfx_modulo_de('calendario', e.dueno) then return; end if;
+  select * into c from public.cierres where estacionamiento = e.id and daterange(desde, hasta, '[]') &&
+    daterange((p_ini at time zone 'America/Santiago')::date, ((p_fin - interval '1 second') at time zone 'America/Santiago')::date, '[]') order by desde limit 1;
+  if c.id is not null then raise exception 'Cerrado del % al %: elige otras fechas', to_char(c.desde, 'DD/MM'), to_char(c.hasta, 'DD/MM'); end if;
+end $$;
+create or replace function public.cierres_mios() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._modulo_o_error('calendario');
+  return coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'estacionamiento', c.estacionamiento, 'titulo', e.titulo, 'desde', c.desde, 'hasta', c.hasta, 'motivo', c.motivo) order by c.desde)
+    from public.cierres c join public.estacionamientos e on e.id = c.estacionamiento where e.dueno = auth.uid() and c.hasta >= (now() at time zone 'America/Santiago')::date), '[]');
+end $$;
+create or replace function public.cierre_guardar(p_est uuid, p_desde date, p_hasta date, p_motivo text) returns uuid language plpgsql security definer set search_path = public as $$
+declare r uuid; hoy date := (now() at time zone 'America/Santiago')::date;
+begin
+  perform public._modulo_o_error('calendario');
+  if not exists (select 1 from public.estacionamientos where id = p_est and dueno = auth.uid()) then raise exception 'Estacionamiento no encontrado'; end if;
+  if p_desde is null or p_hasta is null or p_hasta < p_desde then raise exception 'Elige desde y hasta'; end if;
+  if p_hasta < hoy or p_desde > hoy + 366 or p_hasta - p_desde > 366 then raise exception 'Fechas no válidas (hasta 1 año)'; end if;
+  if (select count(*) from public.cierres where estacionamiento = p_est and hasta >= hoy) >= 30 then raise exception 'Máximo 30 cierres por estacionamiento'; end if;
+  insert into public.cierres (estacionamiento, desde, hasta, motivo) values (p_est, greatest(p_desde, hoy), p_hasta, left(btrim(coalesce(p_motivo, '')), 80)) returning id into r;
+  return r;
+end $$;
+create or replace function public.cierre_borrar(p_id uuid) returns void language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.cierres c using public.estacionamientos e where c.id = p_id and e.id = c.estacionamiento and e.dueno = auth.uid();
+  if not found then raise exception 'Cierre no encontrado'; end if;
+end $$;
+
+-- 🔔 Lista de espera: "Avísame cuando se libere". Al volver a "disponible", aviso a todos (en orden) y la lista se vacía.
+create table if not exists public.esperas (
+  estacionamiento uuid not null references public.estacionamientos (id) on delete cascade,
+  usuario uuid not null references public.perfiles (id) on delete cascade,
+  creado timestamptz not null default now(),
+  primary key (estacionamiento, usuario)
+);
+alter table public.esperas enable row level security;
+revoke all on public.esperas from anon, authenticated;
+create or replace function public.espera_anotar(p_id uuid, p_si boolean) returns boolean language plpgsql security definer set search_path = public as $$
+declare yo public.perfiles := public._yo(); e public.estacionamientos;
+begin
+  select * into e from public.estacionamientos where id = p_id and estado <> 'oculto';
+  if e.id is null then raise exception 'Estacionamiento no encontrado'; end if;
+  if not coalesce(p_si, false) then delete from public.esperas where estacionamiento = p_id and usuario = yo.id; return false; end if;
+  if e.dueno = yo.id then raise exception 'Es tu propio estacionamiento'; end if;
+  if not public.cfx_modulo_de('avisame', e.dueno) then raise exception 'Este estacionamiento no tiene lista de espera'; end if;
+  if (select count(*) from public.esperas where estacionamiento = p_id) >= 100 then raise exception 'La lista de espera está llena'; end if;
+  if (select count(*) from public.esperas where usuario = yo.id) >= 20 then raise exception 'Estás en 20 listas de espera: sal de alguna primero'; end if;
+  insert into public.esperas (estacionamiento, usuario) values (p_id, yo.id) on conflict do nothing;
+  return true;
+end $$;
+create or replace function public.esperas_mias() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._modulo_o_error('avisame');
+  return coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'titulo', e.titulo, 'estado', e.estado,
+      'personas', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', p.nombre, 'desde', w.creado) order by w.creado), '[]') from public.esperas w join public.perfiles p on p.id = w.usuario where w.estacionamiento = e.id)) order by e.creado)
+    from public.estacionamientos e where e.dueno = auth.uid()), '[]');
+end $$;
+create or replace function public._espera_liberado() returns trigger language plpgsql security definer set search_path = public as $$
+declare w record;
+begin
+  if not (new.estado = 'disponible' and old.estado is distinct from 'disponible') then return new; end if;
+  if not public.cfx_modulo_de('avisame', new.dueno) then return new; end if;
+  for w in delete from public.esperas where estacionamiento = new.id returning usuario loop
+    perform public._notificar(w.usuario, '🔔 ¡Se liberó!', '"' || new.titulo || '" ya está disponible: resérvalo antes que otro', '#/e/' || new.id);
+  end loop;
+  return new;
+exception when others then return new;   -- un aviso nunca impide cambiar el estado
+end $$;
+drop trigger if exists est_espera on public.estacionamientos;
+create trigger est_espera after update of estado on public.estacionamientos for each row execute function public._espera_liberado();
+
+-- Lo que la ficha muestra de estos módulos (solo lo que el dueño tiene activo).
+create or replace function public._g104_ficha(e public.estacionamientos, me uuid) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare d public.perfiles; r jsonb := '{}'; n int;
+begin
+  select * into d from public.perfiles where id = e.dueno;
+  if (coalesce(e.finde_pct, 0) <> 0 or coalesce(e.noche_pct, 0) <> 0) and public.cfx_modulo_de('tarifas', e.dueno) then
+    r := r || jsonb_build_object('tarifa', jsonb_build_object('finde', e.finde_pct, 'noche', e.noche_pct)); end if;
+  if coalesce(d.frec_pct, 0) > 0 and public.cfx_modulo_de('frecuentes', e.dueno) then
+    n := case when me is null then 0 else (select count(*) from public.arriendos where dueno = e.dueno and arrendatario = me and estado in ('aceptado', 'finalizado')) end;
+    r := r || jsonb_build_object('frec', jsonb_build_object('pct', d.frec_pct, 'desde', d.frec_desde, 'llevas', n)); end if;
+  if public.cfx_modulo_de('calendario', e.dueno) then
+    r := r || jsonb_build_object('cierres', coalesce((select jsonb_agg(jsonb_build_object('desde', desde, 'hasta', hasta, 'motivo', motivo) order by desde)
+      from (select * from public.cierres where estacionamiento = e.id and hasta >= (now() at time zone 'America/Santiago')::date order by desde limit 6) c), '[]')); end if;
+  if public.cfx_modulo_de('avisame', e.dueno) then
+    r := r || jsonb_build_object('espera', jsonb_build_object('on', true, 'anotado', me is not null and exists (select 1 from public.esperas where estacionamiento = e.id and usuario = me),
+      'personas', case when e.dueno = me then (select count(*) from public.esperas where estacionamiento = e.id) end)); end if;
+  return r;
+end $$;
+
+revoke all on function public._tarifa_total(public.estacionamientos, text, timestamptz, int, int), public.tarifa_guardar(uuid, int, int),
+  public._desc_frecuente(public.estacionamientos, uuid), public.frecuentes(), public.frecuentes_guardar(int, int),
+  public._cierre_choca(public.estacionamientos, timestamptz, timestamptz), public.cierres_mios(), public.cierre_guardar(uuid, date, date, text), public.cierre_borrar(uuid),
+  public.espera_anotar(uuid, boolean), public.esperas_mias(), public._espera_liberado(), public._g104_ficha(public.estacionamientos, uuid) from public, anon, authenticated;
+grant execute on function public.tarifa_guardar(uuid, int, int), public.frecuentes(), public.frecuentes_guardar(int, int), public.cierres_mios(),
+  public.cierre_guardar(uuid, date, date, text), public.cierre_borrar(uuid), public.espera_anotar(uuid, boolean), public.esperas_mias() to authenticated;
 
 -- =====================================================================
 -- Actualización automática (núcleo CodeFix): cada 10 minutos la base revisa GitHub (rama main).

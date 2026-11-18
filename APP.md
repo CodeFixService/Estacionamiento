@@ -14,6 +14,8 @@
 
 - G95 (2.14.87 · bd 52): la cuenta parte FREE (_nuevo_usuario sin dias_regalo) · cfx_pro_prueba_app → plan_origen 'prueba' · cuentas de antes anotadas 1 vez (g95_pruebas). Prueba: SaaS/pruebas/g95.js.
 
+- G104 (2.14.96 · bd 61): 🧩 4 módulos más → 🌙 tarifas (estacionamientos.finde_pct/noche_pct · _tarifa_total por hora/día, no mes · tarifa_guardar) · 🔁 frecuentes (perfiles.frec_pct/frec_desde · _desc_frecuente: se usa el MAYOR entre este y el de estadía larga · frecuentes/frecuentes_guardar) · 📅 calendario (tabla cierres · _cierre_choca en solicitar_arriendo · cierres_mios/cierre_guardar/cierre_borrar) · 🔔 avisame (tabla esperas · espera_anotar/esperas_mias · trigger est_espera al volver a disponible). Ficha: estacionamiento_detalle.g104 = _g104_ficha(e, me). Hojas de Más: T.querySelector (ids duplicados). Prueba: SaaS/pruebas/g104b.js.
+
 ## 🧠 Del núcleo: falta aplicar aquí
 - G42e (núcleo 2.78): utilidades Bootstrap 5.3.8 ya usan los colores CodeFix (--bs-* → --cfx-*). Al revisar esta app: si quiere Bootstrap, enlazar vendor/bootstrap-utilities.min.css ANTES de su CSS (nunca el Bootstrap completo: choca con .btn/.card/.modal/.row/.toast).
 - G48 (núcleo 2.77): revisar en el celular ✋ mover secciones desde el título y 🎨 Color y modo → Colores a tu gusto (fondo, texto, íconos y +); si la app pinta íconos o fondo con colores fijos, pasarlos a var(--cfx-icono)/var(--cfx-fondo).

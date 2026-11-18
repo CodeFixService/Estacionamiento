@@ -78,6 +78,29 @@
   }
   function pedirLogin(motivo) { vLogin(motivo || 'Crea tu cuenta para continuar', 'up'); }
 
+  /* ---------- G104: lo que la ficha muestra de los módulos del dueño ---------- */
+  const fDia = (x) => fecha(String(x).slice(0, 10) + 'T12:00:00');   // fecha sin hora: sin correrse un día por la zona
+  const pctTxt = (p) => (p > 0 ? '+' : '−') + Math.abs(p) + ' %';
+  const tarifaTxt = (t) => [t.finde ? 'Fin de semana ' + pctTxt(t.finde) : '', t.noche ? 'Noche (20:00–07:00) ' + pctTxt(t.noche) : ''].filter(Boolean).join(' · ');
+  function tarifaBase(t, m, ini, n, precio) {
+    const hora = (x) => +new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: 'America/Santiago' }).format(x);
+    const dia = (x) => new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'America/Santiago' }).format(x);
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const u = new Date(ini.getTime() + i * (m === 'hora' ? 3600e3 : 86400e3)); let p = 0;
+      if (/Sat|Sun/.test(dia(u))) p += t.finde || 0;
+      if (m === 'hora') { const h = hora(u); if (h >= 20 || h < 7) p += t.noche || 0; }
+      s += precio * (100 + Math.max(p, -90)) / 100;
+    }
+    return s;
+  }
+  function g104Ficha(d) {
+    const x = d.g104 || {}, out = [];
+    if (x.tarifa) out.push('🌙 ' + esc(tarifaTxt(x.tarifa)));
+    if (x.frec) out.push('🔁 Cliente frecuente: ' + x.frec.pct + ' % menos desde tu reserva ' + x.frec.desde + (d.logueado && !d.mio ? ' (llevas ' + x.frec.llevas + ')' : ''));
+    if (x.cierres && x.cierres.length) out.push(x.cierres.map((c) => '⛔ Cerrado ' + esc(fDia(c.desde)) + (c.hasta !== c.desde ? ' → ' + esc(fDia(c.hasta)) : '') + (c.motivo ? ' · ' + esc(c.motivo) : '')).join('<br>'));
+    return out.length ? '<div class="card small" id="dG104" style="margin-top:12px">' + out.join('<br>') + '</div>' : '';
+  }
   /* ======================= Detalle de estacionamiento (público) ======================= */
   async function vDetalle(id) {
     cargando();
@@ -99,10 +122,13 @@
       '<div class="sec-tit">Ubicación exacta</div><div class="card"><b>📍 ' + esc(d.direccion) + '</b>' + (d.comuna ? '<div class="small muted">' + esc(d.comuna) + '</div>' : '') +
       '<div class="mini-mapa" id="mm" style="margin-top:10px"></div>' +
       '<div class="row" style="margin-top:10px"><a class="btn small sec" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + d.lat + ',' + d.lng + '">🧭 Cómo llegar</a></div></div>' +
+      g104Ficha(d) +
       (ocup.length ? '<div class="sec-tit">Horarios ya reservados</div><div class="card small">' + ocup.map((o) => '<div>⛔ ' + esc(fh(o.inicio)) + ' → ' + esc(fh(o.fin)) + '</div>').join('') + '</div>' : '') +
       '<div class="sec-tit">Publicado por</div>' + (d.logueado ? '<a class="item" href="#/u/' + d.dueno.id + '">' : '<div class="item">') + avatar(d.dueno) + '<div class="grow"><b>' + nombreCon(d.dueno) + '</b><div class="small">' + estrellas(d.dueno.calif) +
       (d.dueno.calif_n ? ' <span class="muted">(' + d.dueno.calif_n + ')</span>' : '') + ' · <span class="muted">desde ' + fecha(d.dueno.desde) + '</span></div></div>' + (d.logueado ? '</a>' : '</div>') +
       (!d.mio && !arr && d.estado === 'disponible' && !reservable ? '<div class="aviso warn" style="margin-top:12px">⏸️ Este estacionamiento no está recibiendo reservas por ahora. Puedes escribirle al dueño.</div>' : '') +
+      (!d.mio && !arr && !reservable && d.g104 && d.g104.espera ? '<button class="btn sec block" id="dEspera" style="margin-top:12px">' + (d.g104.espera.anotado ? '🔕 Salir de la lista de espera' : '🔔 Avísame cuando se libere') + '</button>' : '') +
+      (d.mio && d.g104 && d.g104.espera && d.g104.espera.personas ? '<a class="aviso" style="display:block;margin-top:12px;color:var(--ink)" href="#/mas/avisame">🔔 ' + d.g104.espera.personas + ' en lista de espera · Ver →</a>' : '') +
       (arr ? '<a class="aviso" style="display:block;margin-top:12px;color:var(--ink)" href="#/r/' + arr.id + '">Tu reserva: ' + pill(ESTADO_ARR[arr.estado] || ['', arr.estado]) + ' · Ver →</a>' : '') +
       (d.mio ? '<div class="sec-tit">Tu estacionamiento</div><div class="card"><div class="row between"><span>Estado</span><select id="dEstado" style="width:auto"' + (d.estado === 'oculto' ? ' disabled' : '') + '>' +
         ['disponible', 'ocupado', 'pausado'].map((s) => '<option value="' + s + '"' + (d.estado === s ? ' selected' : '') + '>' + ESTADO_EST[s][1] + '</option>').join('') + '</select></div>' +
@@ -130,12 +156,17 @@
       catch (e) { fallo(e); }
     }, 'Crea tu cuenta para guardar favoritos');
     if ($('dDen')) $('dDen').onclick = () => denunciar('estacionamiento', d.id, d.titulo);
+    if ($('dEspera')) $('dEspera').onclick = conSesion(async () => {
+      try { const si = await Api.rpc('espera_anotar', { p_id: d.id, p_si: !d.g104.espera.anotado }); d.g104.espera.anotado = si;
+        $('dEspera').textContent = si ? '🔕 Salir de la lista de espera' : '🔔 Avísame cuando se libere'; toast(si ? '🔔 Te avisamos apenas se libere' : 'Saliste de la lista de espera'); } catch (e) { fallo(e); }
+    }, 'Crea tu cuenta para que te avisemos');
   }
 
   // Reservar: modalidad, desde cuándo y por cuánto tiempo. Queda apartado mientras se paga.
   async function reservar(d) {
     await Api.ajustes();
     const ops = [['hora', d.ph, 'horas', 24], ['dia', d.pd, 'días', 31], ['mes', d.pm, 'meses', 12]].filter((x) => x[1]);
+    const G4 = d.g104 || {}, frecOk = G4.frec && G4.frec.llevas + 1 >= G4.frec.desde;
     const ahora = new Date(); ahora.setMinutes(0, 0, 0); ahora.setHours(ahora.getHours() + 1);
     const local = (dt) => { const x = new Date(dt); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16); };
     const mins = (Api._aj.reglas || {}).minutos_pago || 30;
@@ -146,7 +177,8 @@
       '<div class="grid2"><div><label>Desde</label><input type="datetime-local" id="rIni" value="' + local(ahora) + '" min="' + local(new Date()) + '"></div>' +
       '<div><label id="rCantL">Cantidad</label><input type="number" id="rCant" inputmode="numeric" min="1" value="1"></div></div>' +
       '<div class="card" style="margin-top:12px"><div class="row between"><span>Total</span><b id="rTot" style="font-size:20px"></b></div><div class="small muted" id="rHasta"></div>' +
-      (d.desc ? '<div class="small" id="rDesc">🏷️ ' + d.desc.pct + ' % menos reservando ' + d.desc.desde + ' o más</div>' : '') + '</div>' +
+      (d.desc ? '<div class="small" id="rDesc">🏷️ ' + d.desc.pct + ' % menos reservando ' + d.desc.desde + ' o más</div>' : '') +
+      (G4.tarifa ? '<div class="small" id="rTarifa">🌙 ' + tarifaTxt(G4.tarifa) + '</div>' : '') + (frecOk ? '<div class="small" id="rFrec">🔁 Cliente frecuente: ' + G4.frec.pct + ' % menos</div>' : '') + '</div>' +
       (pats ? '<label>Patente del auto (opcional)</label><input id="rPat" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="Ej: ABCD12" value="' + esc(pats[0] ? pats[0].patente : '') + '">' +
         (pats.length > 1 ? '<div class="row" id="rPats" style="flex-wrap:wrap;gap:6px;margin-top:6px">' + pats.map((x) => '<button type="button" class="btn small sec" data-p="' + esc(x.patente) + '">' + esc(x.patente) + (x.alias ? ' · ' + esc(x.alias) : '') + '</button>').join('') + '</div>' : '') : '') +
       '<label>Mensaje para el dueño (opcional)</label><textarea id="rNota" maxlength="300" placeholder="Ej: auto mediano, llego a las 8:00"></textarea>' +
@@ -157,9 +189,11 @@
       const n = Math.max(1, Math.min(mod[3], +c.querySelector('#rCant').value || 1));
       c.querySelector('#rCantL').textContent = 'Cantidad de ' + mod[2] + ' (máx. ' + mod[3] + ')';
       // G94 🏷️ descuento por estadía larga (el servidor lo aplica igual)
-      const ds = d.desc && n >= d.desc.desde ? d.desc.pct : 0;
-      c.querySelector('#rTot').textContent = clp(Math.round(mod[1] * n * (100 - ds) / 100)) + (ds ? ' (−' + ds + ' %)' : '');
+      // G104: 🔁 premio frecuente (se usa el mayor de los dos) y 🌙 tarifa por hora/día (igual que el servidor)
+      const ds = Math.max(d.desc && n >= d.desc.desde ? d.desc.pct : 0, frecOk ? G4.frec.pct : 0);
       const ini = new Date(c.querySelector('#rIni').value);
+      const base = G4.tarifa && mod[0] !== 'mes' && !isNaN(ini) ? tarifaBase(G4.tarifa, mod[0], ini, n, mod[1]) : mod[1] * n;
+      c.querySelector('#rTot').textContent = clp(Math.round(Math.round(base) * (100 - ds) / 100)) + (ds ? ' (−' + ds + ' %)' : '');
       if (!isNaN(ini)) {
         const fin = new Date(ini);
         if (mod[0] === 'hora') fin.setHours(fin.getHours() + n); else if (mod[0] === 'dia') fin.setDate(fin.getDate() + n); else fin.setMonth(fin.getMonth() + n);
@@ -582,10 +616,14 @@
         !adm && { k: 'links', ico: '💳', t: 'Links de pago', grupo: g, abrir: en(vLinks) },
         !adm && { k: 'favoritos', ico: '❤️', t: 'Favoritos', grupo: g, abrir: en(vFavoritos) },
         !adm && { k: 'estadisticas', ico: '📊', t: 'Estadísticas', grupo: g, abrir: en(vEstadisticas) },
-        !adm && { k: 'modulos', ico: '🧩', t: 'Módulos', d: 'Destacado, acceso QR, descuentos y ganancias', grupo: g, abrir: en(vModulos) },
+        !adm && { k: 'modulos', ico: '🧩', t: 'Módulos', d: 'Destacado, acceso QR, tarifas, lista de espera…', grupo: g, abrir: en(vModulos) },
         !adm && { k: 'acceso', ico: '🔑', t: 'Control de acceso', d: 'Valida el pase QR de cada reserva', grupo: g, abrir: en(vAcceso) },
         !adm && { k: 'descuentos', ico: '🏷️', t: 'Descuento por estadía larga', grupo: g, abrir: en(vDescuentos) },
         !adm && { k: 'ganancias', ico: '💰', t: 'Ganancias y ocupación', grupo: g, abrir: en(vGanancias) },
+        !adm && { k: 'tarifas', ico: '🌙', t: 'Tarifa fin de semana y noche', grupo: g, abrir: en(vTarifas) },
+        !adm && { k: 'frecuentes', ico: '🔁', t: 'Clientes frecuentes', d: 'Quién vuelve y su premio', grupo: g, abrir: en(vFrecuentes) },
+        !adm && { k: 'calendario', ico: '📅', t: 'Cerrar fechas', d: 'Vacaciones o uso propio', grupo: g, abrir: en(vCalendario) },
+        !adm && { k: 'avisame', ico: '🔔', t: 'Lista de espera', d: 'Les avisamos cuando se libera', grupo: g, abrir: en(vEsperas) },
         !adm && { k: 'patentes', ico: '🔢', t: 'Mis patentes', d: 'Los autos con los que reservas', grupo: 'Tus autos', abrir: en(vPatentes) },
         !adm && { k: 'premium', ico: '⭐', t: 'Mi plan', dato: Api.cuenta.premium ? (Api.cuenta.plan_origen === 'prueba' ? 'Prueba' : 'Premium') : 'Free', grupo: 'Tu plan', abrir: en(vPremium) },
         { k: 'cuenta', ico: 'cuenta', t: 'Mi cuenta', d: 'QR, alerta de zona, respaldo y versión', grupo: 'Configuración', abrir: en(vCuenta) }
@@ -675,6 +713,58 @@
     $('gCsv').onclick = () => { const c = (x) => '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"';
       const u = URL.createObjectURL(new Blob(['\ufeff' + 'fecha,lugar,modalidad,cantidad,total,estado\n' + g.filas.map((f) => [f.fecha, f.lugar, f.modalidad, f.cantidad, f.total, f.estado].map(c).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' }));
       const a = document.createElement('a'); a.href = u; a.download = 'ganancias.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); };
+  }
+  /* ---------- G104 · 🧩 4 módulos más ---------- */
+  // 🌙 Tarifa fin de semana y nocturna (por cada lugar; el servidor la aplica al reservar)
+  async function vTarifas(T) {
+    if (!(await mods()).tarifas) return sinMod(T, 'tarifas', 'Cobra distinto el fin de semana y de noche (20:00 a 07:00): un % más o menos por cada hora o día.');
+    const r = await Api.rpc('mis_estacionamientos');
+    T.innerHTML = '<p class="muted small">Ej.: +20 % el fin de semana, −10 % de noche. 0 = igual que siempre. No aplica al arriendo por mes.</p>' +
+      (r.length ? r.map((e) => '<div class="card" style="margin-top:10px"><b>' + esc(e.titulo) + '</b><div class="grid2"><div><label>% fin de semana</label><input type="number" inputmode="numeric" min="-50" max="100" data-fi="' + e.id + '" value="' + (+e.finde_pct || 0) + '"></div>' +
+        '<div><label>% de noche</label><input type="number" inputmode="numeric" min="-50" max="100" data-no="' + e.id + '" value="' + (+e.noche_pct || 0) + '"></div></div><button class="btn block" data-gt="' + e.id + '" style="margin-top:8px">💾 Guardar</button></div>').join('')
+        : '<div class="vacio"><p>Publica un estacionamiento primero.</p></div>');
+    T.onclick = async (ev) => { const b = ev.target.closest('[data-gt]'); if (!b) return; const id = b.dataset.gt;
+      try { await Api.rpc('tarifa_guardar', { p_id: id, p_finde: Math.round(+T.querySelector('[data-fi="' + id + '"]').value || 0), p_noche: Math.round(+T.querySelector('[data-no="' + id + '"]').value || 0) }); toast('💾 Tarifa guardada'); } catch (e) { toast(e.message); } };
+  }
+  // 🔁 Clientes frecuentes + premio automático
+  async function vFrecuentes(T) {
+    if (!(await mods()).frecuentes) return sinMod(T, 'frecuentes', 'Ve quién te arrienda más y prémialo solo: un % menos desde su reserva número N.');
+    const f = await Api.rpc('frecuentes');
+    T.innerHTML = '<div class="card"><b>🎁 Premio automático</b><p class="small muted">Desde su reserva N contigo, paga un % menos (si también tiene descuento por estadía larga, se usa el mayor).</p>' +
+      '<div class="grid2"><div><label>% de premio (0 a 30)</label><input type="number" inputmode="numeric" min="0" max="30" id="frPct" value="' + (+f.pct || 0) + '"></div>' +
+      '<div><label>Desde la reserva N°</label><input type="number" inputmode="numeric" min="2" max="20" id="frDesde" value="' + (+f.desde || 3) + '"></div></div><button class="btn block" id="frOk" style="margin-top:8px">💾 Guardar</button></div>' +
+      '<h3 style="margin:14px 0 6px">Quién más te arrienda</h3>' +
+      (f.lista.length ? f.lista.map((x, i) => '<a class="item" href="#/u/' + esc(x.id) + '" style="color:var(--ink)"><div class="grow"><b>' + (i < 3 ? ['🥇', '🥈', '🥉'][i] + ' ' : '') + esc(x.nombre || 'Sin nombre') + '</b><div class="small muted">' + x.reservas + ' reserva' + (x.reservas === 1 ? '' : 's') + ' · ' + clp(x.total) + ' · última ' + esc(fecha(x.ultima)) + '</div></div><span class="small">💬</span></a>').join('')
+        : '<div class="vacio"><p>Aún no tienes reservas confirmadas.</p></div>');
+    T.querySelector('#frOk').onclick = async () => { try { await Api.rpc('frecuentes_guardar', { p_pct: Math.round(+T.querySelector('#frPct').value || 0), p_desde: Math.round(+T.querySelector('#frDesde').value || 3) }); toast('💾 Premio guardado'); } catch (e) { toast(e.message); } };
+  }
+  // 📅 Cerrar fechas
+  async function vCalendario(T) {
+    if (!(await mods()).calendario) return sinMod(T, 'calendario', 'Cierra días (vacaciones, uso propio): nadie puede reservar esas fechas y la ficha lo muestra.');
+    const [ests, L] = await Promise.all([Api.rpc('mis_estacionamientos'), Api.rpc('cierres_mios')]);
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+    T.innerHTML = (ests.length ? '<div class="card"><b>⛔ Cerrar fechas</b><label>Estacionamiento</label><select id="ciEst">' + ests.map((e) => '<option value="' + e.id + '">' + esc(e.titulo) + '</option>').join('') + '</select>' +
+      '<div class="grid2"><div><label>Desde</label><input type="date" id="ciDesde" min="' + hoy + '" value="' + hoy + '"></div><div><label>Hasta</label><input type="date" id="ciHasta" min="' + hoy + '" value="' + hoy + '"></div></div>' +
+      '<label>Motivo (opcional)</label><input id="ciMot" maxlength="80" placeholder="Ej: vacaciones"><button class="btn block" id="ciOk" style="margin-top:8px">⛔ Cerrar estas fechas</button></div>' : '<div class="vacio"><p>Publica un estacionamiento primero.</p></div>') +
+      '<h3 style="margin:14px 0 6px">Fechas cerradas</h3>' + (L.length ? L.map((c) => '<div class="item"><div class="grow"><b>' + esc(c.titulo) + '</b><div class="small muted">' + esc(fDia(c.desde)) + ' → ' + esc(fDia(c.hasta)) + (c.motivo ? ' · ' + esc(c.motivo) : '') + '</div></div><button class="btn small line" data-ci="' + c.id + '">Abrir</button></div>').join('') : '<div class="vacio"><p>No tienes fechas cerradas.</p></div>');
+    T.onclick = async (ev) => {
+      try {
+        const b = ev.target.closest('[data-ci]');
+        if (b) { if (await confirmar('¿Volver a abrir estas fechas?', 'Abrir')) { await Api.rpc('cierre_borrar', { p_id: b.dataset.ci }); toast('✅ Fechas abiertas'); vCalendario(T); } return; }
+        if (!ev.target.closest('#ciOk')) return;
+        await Api.rpc('cierre_guardar', { p_est: T.querySelector('#ciEst').value, p_desde: T.querySelector('#ciDesde').value || null, p_hasta: T.querySelector('#ciHasta').value || null, p_motivo: T.querySelector('#ciMot').value });
+        toast('✅ Fechas cerradas: nadie puede reservarlas'); vCalendario(T);
+      } catch (e) { toast(e.message); }
+    };
+  }
+  // 🔔 Lista de espera (quién espera cada lugar)
+  async function vEsperas(T) {
+    if (!(await mods()).avisame) return sinMod(T, 'avisame', 'Si tu lugar está ocupado, la gente se anota y le avisamos apenas lo marques disponible.');
+    const L = await Api.rpc('esperas_mias');
+    T.innerHTML = '<p class="muted small">En la ficha de tu estacionamiento ocupado o en pausa sale “🔔 Avísame cuando se libere”. Al ponerlo <b>Disponible</b>, les llega el aviso a todos.</p>' +
+      (L.length ? L.map((e) => '<div class="card" style="margin-top:10px"><div class="row between"><b>' + esc(e.titulo) + '</b>' + pill(ESTADO_EST[e.estado] || ['', e.estado]) + '</div>' +
+        (e.personas.length ? e.personas.map((p, i) => '<a class="item" href="#/u/' + esc(p.id) + '" style="color:var(--ink)"><div class="grow">' + (i + 1) + '. <b>' + esc(p.nombre || 'Sin nombre') + '</b><div class="small muted">desde ' + esc(fecha(p.desde)) + '</div></div></a>').join('')
+          : '<div class="small muted" style="margin-top:6px">Nadie en espera.</div>') + '</div>').join('') : '<div class="vacio"><p>Publica un estacionamiento primero.</p></div>');
   }
   async function vPatentes(T, lista) {
     const r = lista || await Api.rpc('mis_patentes');
