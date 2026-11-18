@@ -24,3 +24,5 @@
 - G43: revisar la tarjeta "🚀 Termina de armar tu negocio" (núcleo) en el inicio (o marcar data-cfx-guia); afinar guiaPasos (#/publicar, #/mas/perfil → campo exacto); quitar avisos propios de instalar/notificaciones si se repiten.
 - G106 (2.14.98 · bd 62): ⚡ pago automático del arriendo mensual (suscripción de MP del dueño, ref 'auto:<id>'): arriendo_mp_auto / _revisar (?mpa=) / _quitar + gancho cfx_mp_neg_sub_app (cobro → +1 mes) · renovar_mensuales/renovar_arriendo la apagan · _auto_activo(id). Pantalla: vReserva #rAuto (#rAutoSi / #rAutoNo). Prueba: SaaS/pruebas/g106.js.
 - G107 (2.15 · bd 64): 💳 pago con el Flow (Webpay) del dueño: arriendo_mp_pagar(id, volver, p_medio) · mis_arriendos.medios · js/app.js mpBotones(x, monto) [data-mp="mp"|"flow"] · ⚡ pago automático (G106) sigue SOLO con MP (cfx_mp_neg_mp). Dueño: Más → 💳 Links de pago (tarjeta Flow debajo de #lkMp). Prueba: SaaS/pruebas/g107.js.
+
+- 🧩 G112 b · Packs 🌱 Básico · ⭐ Normal (clave `crecer`, destacado) · 💎 Completo, iguales en las 6; precios y módulos: SaaS/LANZAMIENTO.md (Módulos, paso 3). Solo cambian si siguen de fábrica.

@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '65') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '66') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -7399,6 +7399,11 @@ update public.cfx_config set valor = jsonb_set(valor, '{packs}', jsonb_build_obj
     'basico',   jsonb_build_object('nombre', '🌱 Más reservas', 'detalle', 'Destacado en el mapa y descuento por estadía larga', 'precio', 1490, 'modulos', jsonb_build_array('destacar', 'descuentos')),
     'completo', jsonb_build_object('nombre', '💎 Completo', 'detalle', 'Todos los módulos, también los nuevos', 'precio', 2490, 'destacado', true, 'modulos', '*')))
 where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrito';
+-- G112 b: 3 packs iguales en todas las apps (🌱 Básico · ⭐ Normal · 💎 Completo). Solo si siguen los de fábrica.
+update public.cfx_config set valor = jsonb_set(jsonb_set(jsonb_set(valor, '{packs,basico,nombre}', '"🌱 Básico"'), '{packs,completo,destacado}', 'false'), '{packs,crecer}',
+    jsonb_build_object('nombre', '⭐ Normal', 'detalle', 'Más reservas y clientes que vuelven', 'precio', 1990, 'destacado', true,
+                       'modulos', jsonb_build_array('destacar', 'descuentos', 'avisame', 'frecuentes', 'tarifas')))
+where clave = 'modulos_venta' and valor #> '{packs,crecer}' is null and valor #>> '{packs,basico,nombre}' = '🌱 Más reservas';
 create or replace function public.mis_modulos() returns jsonb
 language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_object_agg(k, public.cfx_modulo_de(k, auth.uid())), '{}') from unnest(public.cfx_modulos_app()) k
