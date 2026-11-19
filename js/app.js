@@ -256,7 +256,7 @@
     if (!dueno && x.estado === 'por_pagar') {
       b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
 (x.mp ? mpBotones(x, x.monto_pagar) + '<p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
-        (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted">' + esc(x.pago.texto) + '</p>' : '')
+        (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted" style="white-space:pre-line">' + esc(x.pago.texto) + '</p>' + (window.CodeFixVitrina && CodeFixVitrina.transfLeer && CodeFixVitrina.transfLeer(x.pago.texto) ? '<button type="button" class="btn line small" data-cfx-copiar="' + esc(x.pago.texto) + '">📋 Copiar datos</button>' : '') : '')
           : (x.mp ? '<p class="small muted">¿Otra forma de pago? Coordínala por el chat y sube el comprobante.</p>' : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>')) +
         '<label>Foto del comprobante</label><input type="file" id="rComp" accept="image/*"><button class="btn block" id="rSubir" style="margin-top:10px">📤 Subir comprobante</button>');
     }
@@ -841,6 +841,8 @@
         '<label>Texto o datos de transferencia (opcional)</label><textarea class="lkTxt" maxlength="300" placeholder="Ej: Banco Estado, cuenta RUT 12.345.678-9">' + esc(s.texto) + '</textarea>' +
         '<button class="btn block lkOk" style="margin-top:10px">Guardar espacio ' + s.slot + '</button></div>').join('');
     if (window.CFX_PAGOS && CFX_PAGOS.mpNegocio) CFX_PAGOS.mpNegocio(T.querySelector('#lkMp'), { rpc: (n, a) => Api.rpc(n, a), para: 'su reserva o el mes', btn: 'btn', btnAlt: 'btn line' });
+    // G117: el texto del espacio puede ser datos de banco por campos (o seguir como texto libre).
+    if (window.CodeFixVitrina && CodeFixVitrina.transferencia) T.querySelectorAll('.lkTxt').forEach((x) => CodeFixVitrina.transferencia(x, { opcional: true }));
     T.onclick = async (ev) => {
       const b = ev.target.closest('.lkOk'); if (!b) return;
       const c = b.closest('[data-slot]');
