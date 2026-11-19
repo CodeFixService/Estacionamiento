@@ -257,6 +257,7 @@
       b.push('<div class="aviso warn" style="margin-top:12px">⏳ Apartado por <b id="rReloj">' + quedan(x.expira_at) + '</b> minutos. ' + esc(Api.texto('reserva_pago', '')) + '</div>' +
 (x.mp ? mpBotones(x, x.monto_pagar) + '<p class="small muted" style="margin:4px 0 0">Se confirma solo: sin comprobante.</p>' : '') +
         (x.pago && x.pago.url ? '<a class="btn block gold" style="margin-top:10px" target="_blank" rel="noopener" href="' + esc(x.pago.url) + '">💳 Pagar ' + clp(x.monto_pagar) + '</a>' + (x.pago.texto ? '<p class="small muted" style="white-space:pre-line">' + esc(x.pago.texto) + '</p>' + (window.CodeFixVitrina && CodeFixVitrina.transfLeer && CodeFixVitrina.transfLeer(x.pago.texto) ? '<button type="button" class="btn line small" data-cfx-copiar="' + esc(x.pago.texto) + '">📋 Copiar datos</button>' : '') : '')
+          : x.pago && x.pago.texto ? '<p class="small" style="margin:10px 0 0">🏦 <b>Transfiere ' + clp(x.monto_pagar) + ':</b></p><p class="small muted" style="white-space:pre-line;margin-top:4px">' + esc(x.pago.texto) + '</p><button type="button" class="btn line small" data-cfx-copiar="' + esc(x.pago.texto) + '">📋 Copiar datos</button>'  // G128 b: 🏦 solo datos de banco también es un medio
           : (x.mp ? '<p class="small muted">¿Otra forma de pago? Coordínala por el chat y sube el comprobante.</p>' : '<p class="small">El dueño aún no configura su link de pago: coordina el pago por el chat y sube el comprobante.</p>')) +
         '<label>Foto del comprobante</label><input type="file" id="rComp" accept="image/*"><button class="btn block" id="rSubir" style="margin-top:10px">📤 Subir comprobante</button>');
     }
@@ -667,7 +668,7 @@
 
   async function vPublicados(T) {
     const a = Api.cuenta, r = await Api.rpc('mis_estacionamientos');
-    T.innerHTML = '<div class="row between"><span class="muted small">Usas ' + r.length + ' de ' + a.lim.publicar + ' publicaciones</span><a class="btn small" href="#/publicar">' + ico('plus') + ' Publicar</a></div>' +
+    T.innerHTML = (r.length && a.link_listo === false ? '<div id="pubSinMedio"></div>' : '') + '<div class="row between"><span class="muted small">Usas ' + r.length + ' de ' + a.lim.publicar + ' publicaciones</span><a class="btn small" href="#/publicar">' + ico('plus') + ' Publicar</a></div>' +
       '<div class="barra"><i style="width:' + Math.min(100, r.length / Math.max(1, a.lim.publicar) * 100) + '%"></i></div>' +
       (!Api.puede('destacado') ? '<a class="aviso" style="display:block;margin:10px 0;color:var(--ink)" href="#/premium">⭐ <b>Premium:</b> publica más, pin dorado destacado y estadísticas.</a>' : '') +
       (r.length ? r.map((e) => '<div class="card" style="margin-top:10px"><a class="row" href="#/e/' + e.id + '" style="color:var(--ink)">' + imgMini(e.foto) + '<div class="grow"><b>' + esc(e.titulo) + '</b><div class="small muted">' + esc(e.comuna || '') + '</div><div class="small">' + esc(precioTxt(e)) + '</div>' +
@@ -678,6 +679,7 @@
           '<a class="btn sec small" href="#/editar/' + e.id + '">' + ico('edit') + ' Editar</a></div></div>').join('')
         : '<div class="vacio">' + ico('car') + '<p>¿Tienes un estacionamiento sin usar? Publícalo y gana plata extra.</p><a class="btn" href="#/publicar">Publicar ahora</a></div>');
     U.ponerIconos(T);
+    if (T.querySelector('#pubSinMedio') && window.CFX_COBRO) CFX_COBRO.sinMedios(T.querySelector('#pubSinMedio'), { titulo: 'Tus arrendatarios no pueden pagar en línea.', texto: 'Hoy coordinan el pago por el chat.', ir: '#/mas/links' });
     T.onchange = async (ev) => {
       const s = ev.target.closest('[data-est]'); if (!s) return;
       try { await Api.rpc('estado_estacionamiento', { p_id: s.dataset.est, p_estado: s.value }); toast('Estado actualizado'); g.Mapa.recargar(); } catch (er) { fallo(er); }

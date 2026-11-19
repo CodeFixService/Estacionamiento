@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '70') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '71') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -1162,7 +1162,8 @@ end $$;
 create or replace function public._cobro_listo(p_dueno uuid) returns boolean
 language plpgsql stable security definer set search_path = public as $$
 begin
-  return exists (select 1 from public.links_pago where dueno = p_dueno and tipo = 'arriendo' and activo and url <> '')
+  -- G128 b: 🏦 datos de banco (texto) también es un medio (G117).
+  return exists (select 1 from public.links_pago where dueno = p_dueno and tipo = 'arriendo' and activo and (url <> '' or coalesce(btrim(texto), '') <> ''))
     or coalesce(public.cfx_mp_neg_activo(p_dueno), false);
 end $$;
 revoke all on function public._cobro_listo(uuid) from public, anon, authenticated;
