@@ -897,7 +897,7 @@ insert into public.config (clave, valor) values
   ('dias_devolucion', '3'),          -- días que tiene el dueño para devolver un pago antes de avisar al administrador
   ('dias_anual', '365')              -- días de Premium que entrega el pago anual (el mensual usa la duración del plan)
 on conflict (clave) do nothing;
-insert into public.config (clave, valor) values ('version_bd', '68') on conflict (clave) do update set valor = excluded.valor;
+insert into public.config (clave, valor) values ('version_bd', '69') on conflict (clave) do update set valor = excluded.valor;
 alter table public.config enable row level security;
 
 create table if not exists public.textos (clave text primary key, valor text not null default '');
@@ -7607,6 +7607,38 @@ end $$;
 revoke all on function public.cfx_estudio_negocio(), public.cfx_estudio_puede(uuid), public.cfx_estudio_fila(public.cfx_estudio) from public, anon, authenticated;
 revoke all on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) from public, anon;
 grant execute on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) to authenticated;
+-- ===================== G122 🖼️ Fotos a Storage (núcleo) =====================
+-- Bucket público 'vitrina': cada uno sube SOLO a su carpeta (<su id>/<uuid>.webp), hasta 700 KB, solo imágenes. Nadie lista lo ajeno.
+-- Las apps aceptan en sus fotos de vitrina el texto base64 de siempre O una URL de este bucket (cfx_foto_ok). Lo viejo sigue igual.
+do $$ begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('vitrina', 'vitrina', true, 716800, array['image/webp', 'image/jpeg', 'image/png'])
+    on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+    drop policy if exists cfx_vitrina_subir on storage.objects;
+    drop policy if exists cfx_vitrina_ver on storage.objects;
+    drop policy if exists cfx_vitrina_borrar on storage.objects;
+    create policy cfx_vitrina_subir on storage.objects for insert to authenticated
+      with check (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_ver on storage.objects for select to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_borrar on storage.objects for delete to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+  end if;
+end $$;
+
+-- ¿Es una foto de la nube (bucket vitrina de Supabase)? Con p_uid: además, ¿la subió esa persona?
+create or replace function public.cfx_foto_nube(t text, p_uid uuid default null) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') ~ '^https://[a-z0-9-]+\.supabase\.co/storage/v1/object/public/vitrina/[0-9a-f-]{36}/[0-9a-f-]{36}\.(webp|jpg|png)$'
+    and (p_uid is null or split_part(split_part(t, '/vitrina/', 2), '/', 1) = p_uid::text)
+$$;
+-- Foto de vitrina válida: vacía, base64 liviano (≤ maxlen) o de la nube.
+create or replace function public.cfx_foto_ok(t text, maxlen int) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen) or public.cfx_foto_nube(t)
+$$;
+grant execute on function public.cfx_foto_nube(text, uuid), public.cfx_foto_ok(text, int) to authenticated, anon;
 -- <<< CFX núcleo
 
 -- G95 🎁 Prueba Premium por botón (núcleo cfx_pro_probar): queda como plan_origen 'prueba' (no 'pago').
