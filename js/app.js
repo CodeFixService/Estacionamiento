@@ -652,6 +652,7 @@
         !adm && { k: 'acceso', ico: '🔑', t: 'Control de acceso', d: 'Valida el pase QR de cada reserva', grupo: g, abrir: en(vAcceso) },
         !adm && { k: 'descuentos', ico: '🏷️', t: 'Descuento por estadía larga', grupo: g, abrir: en(vDescuentos) },
         !adm && { k: 'ganancias', ico: '💰', t: 'Ganancias y ocupación', grupo: g, abrir: en(vGanancias) },
+        !adm && { k: 'estudio', ico: '🎬', t: 'Estudio de contenido', d: 'Ideas para tus redes listas para copiar', grupo: g, abrir: en((T) => window.CFX_ESTUDIO ? CFX_ESTUDIO.montar(T, { rpc: (f, x) => Api.rpc(f, x), probar: (k) => verModulo(k) }) : (T.innerHTML = '<div class="vacio">Actualiza la app</div>')) },  // G112 d (núcleo)
         !adm && { k: 'tarifas', ico: '🌙', t: 'Tarifa fin de semana y noche', grupo: g, abrir: en(vTarifas) },
         !adm && { k: 'frecuentes', ico: '🔁', t: 'Clientes frecuentes', d: 'Quién vuelve y su premio', grupo: g, abrir: en(vFrecuentes) },
         !adm && { k: 'calendario', ico: '📅', t: 'Cerrar fechas', d: 'Vacaciones o uso propio', grupo: g, abrir: en(vCalendario) },

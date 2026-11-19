@@ -26,3 +26,4 @@
 - G107 (2.15 · bd 64): 💳 pago con el Flow (Webpay) del dueño: arriendo_mp_pagar(id, volver, p_medio) · mis_arriendos.medios · js/app.js mpBotones(x, monto) [data-mp="mp"|"flow"] · ⚡ pago automático (G106) sigue SOLO con MP (cfx_mp_neg_mp). Dueño: Más → 💳 Links de pago (tarjeta Flow debajo de #lkMp). Prueba: SaaS/pruebas/g107.js.
 
 - 🧩 G112 b · Packs 🌱 Básico · ⭐ Normal (clave `crecer`, destacado) · 💎 Completo, iguales en las 6; precios y módulos: SaaS/LANZAMIENTO.md (Módulos, paso 3). Solo cambian si siguen de fábrica.
+- 🎬 G112 d · Estudio de contenido = 🧩 módulo 'estudio' (núcleo estudio.sql/estudio.js; ayuda.js lo carga al abrir: CFX_ESTUDIO.montar(zona, { rpc, probar, nombre })). Datos en cfx_estudio (solo el dueño por funciones). Entra en ⭐ Normal (si sigue de fábrica) y 💎 Completo. Dónde: Más → 🎬 Estudio de contenido (k 'estudio').
