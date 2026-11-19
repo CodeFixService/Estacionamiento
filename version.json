@@ -1,1 +1,1 @@
-{"version": "2.31", "bd": 71, "notas": "⚠️ núcleo 3.31: aviso al dueño si sus clientes no pueden pagar (G128 b)", "funcion": "1.4"}
+{"version": "2.32", "bd": 72, "notas": "🧹 núcleo 3.32: las fotos que ya nadie usa se borran solas de Storage (G122 b)", "funcion": "1.4"}
