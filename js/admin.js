@@ -51,9 +51,8 @@
           ['Estacionamientos', r.estacionamientos], ['Disponibles', r.disponibles], ['Arriendos activos', r.arriendos_activos], ['Arriendos totales', r.arriendos_total],
           ['Reservas en revisión', r.reservas_revision], ['Suspendidos', r.suspendidos]]
           .map((k) => '<div class="kpi"><b>' + k[1] + '</b><small>' + k[0] + '</small></div>').join('') + '</div>' +
-        // El uso del servidor se ve en el Centro de Mando → Resumen (carrusel de servidores); aquí solo la limpieza.
-        '<div class="sec-tit">🧹 Limpieza</div><div class="card"><p class="small muted" style="margin-top:0">Los mensajes se borran solos a los 30 días y las fotos se guardan comprimidas. También puedes limpiar ahora:</p>' +
-        '<button class="btn sec small" id="aLimpiar">🧹 Limpiar ahora</button></div>' +
+        // G144 a: la limpieza se hace solo en el Centro de Mando → Apps.
+        '<p class="small muted">🧹 Limpieza y respaldo: en el Centro de Mando → Apps.</p>' +
         '<div class="sec-tit">Registros últimos 14 días</div><div class="card"><div class="barras">' + r.registros.map((x) => '<div title="' + esc(x.d) + ': ' + x.n + '" style="height:' + (x.n / maxR * 100) + '%"></div>').join('') + '</div></div>' +
         '<div class="sec-tit">Comunas con más estacionamientos</div><div class="card">' + (r.comunas.length ? r.comunas.map((c) => '<div class="row between"><span>' + esc(c.c) + '</span><b>' + c.n + '</b></div>').join('') : '<span class="muted">Aún no hay</span>') + '</div>' +
         '<div class="sec-tit">Compartir la app</div><div class="card center"><div class="qr-caja" id="aQR"></div><p class="small" style="word-break:break-all">' + esc(U.enlace('')) + '</p>' +
@@ -64,11 +63,6 @@
       const inv = '🅿️ Te invito a *Estaciona*: arrienda o publica estacionamientos en Santiago con personas verificadas.\n\n1. Abre: ' + U.enlace('') + '\n2. Toca "Instalar" (iPhone: Compartir → Agregar a inicio)\n3. Crea tu cuenta y tienes 7 días Premium gratis 🎁';
       $('aWA').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(inv), '_blank');
       $('aComp').onclick = () => U.compartir('Estaciona', inv, U.enlace(''));
-      $('aLimpiar').onclick = async (e) => {
-        e.target.disabled = true; e.target.textContent = 'Limpiando…';
-        try { const x = await Api.funcion('limpiar'); toast('Listo: ' + (x.borrados || 0) + ' archivos borrados'); vista('resumen'); }
-        catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = '🧹 Limpiar ahora'; }
-      };
     },
 
     async verificaciones(C) {
@@ -212,7 +206,7 @@
       window.CFX_AJUSTES.montar(C, [
         { k: 'reglas', ico: '⏱️', t: 'Reglas', d: 'Pagos, devoluciones y mensajes', abrir: (z) => VISTAS.seccion(z, 'reglas', a) },
         { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y función "enviar"', abrir: (z) => VISTAS.seccion(z, 'push', a) },
-        { k: 'mant', ico: '🧹', t: 'Mantención', d: 'Limpieza y base de datos', abrir: (z) => VISTAS.seccion(z, 'mant', a) },
+        { k: 'mant', ico: '🧹', t: 'Base de datos', d: 'Versión y actualizar', abrir: (z) => VISTAS.seccion(z, 'mant', a) },
         { k: 'cuenta', ico: '👤', t: 'Mi cuenta', d: 'Foto, nombre y clave', abrir: (z) => g.App.vCuenta(z) },
         { k: 'registro', ico: '📜', t: 'Registro de cambios', d: 'Lo que se hizo en el panel', abrir: (z) => window.CFX_AJUSTES.registro(z, (f, x) => Api.rpc(f, x), { lista: true }) }
       ], { arriba: '<p class="small muted" style="margin:0 0 10px">Precios, planes, textos, keys, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
@@ -232,7 +226,7 @@
         html = '<div class="card"><h3 style="margin-top:0">🔔 Notificaciones push</h3><p class="small muted">' + (a.vapid_public && a.push ? '✅ Claves configuradas.' : 'Genera las claves una sola vez para enviar notificaciones al celular.') + '</p>' +
           '<div class="row wrap"><button class="btn sec small" id="ajVapid">' + (a.vapid_public ? 'Regenerar claves' : 'Generar claves push') + '</button><button class="btn sec small" id="ajPing">Probar función "enviar"</button><button class="btn sec small" id="ajYo">Prueba: aviso solo a mí</button></div></div>';
       } else {
-        html = '<div class="card"><p class="small muted">Borra mensajes y comprobantes viejos y fotos que ya no se usan, según las reglas.</p><button class="btn sec" id="mLimpiar">🧹 Limpiar ahora</button></div>' +
+        html = '<div class="card"><p class="small muted">🧹 Limpieza y respaldo: en el Centro de Mando → Apps.</p></div>' +
           cardBD(String((await Api.ajustes(true)).version_bd || '?'));
       }
       C.innerHTML = html;
@@ -243,11 +237,6 @@
           return;
         }
         if (await accionBD(e.target)) return;
-        if (e.target.id === 'mLimpiar') {
-          e.target.disabled = true;
-          try { const x = await Api.funcion('limpiar'); toast('Listo: ' + (x.borrados || 0) + ' archivos borrados'); } catch (er) { toast(er.message); }
-          e.target.disabled = false; return;
-        }
         if (e.target.id === 'ajVapid') {
           if (a.vapid_public && !await confirmar('Si regeneras las claves, cada persona deberá activar de nuevo las notificaciones. ¿Seguir?', 'Regenerar', true)) return;
           try {

@@ -4,7 +4,7 @@
   const U = g.U, Api = g.Api, cfg = g.EST_CONFIG;
   const { $, esc, clp, ico, toast, modal, cerrarModal, confirmar, avatar, nombreCon, estrellas, imgMini, urlFoto, hace, fecha, hora, fh, quedan } = U;
   const V = $('vista');
-  let rutaActual = '', pollChat = null, ajustes = null;
+  let rutaActual = '', pollChat = null;
   const COLORES_GRATIS = [['Azul', '#2563eb'], ['Negro', '#0f172a'], ['Verde', '#16a34a'], ['Rojo', '#dc2626'], ['Violeta', '#7c3aed'], ['Naranja', '#ea580c']];
   const ICONOS = ['🚗', '🏍️', '🛻', '🚙', '🚕', '🅿️', '😎', '⭐', '🔑', '🏠', '🐶', '⚽'];
   const MODAL = { hora: 'Por hora', dia: 'Por día', mes: 'Mensual' };
@@ -13,11 +13,6 @@
   const PAGO = { devolver: ['bad', '💸 Por devolver'], devuelto: ['ok', 'Devuelto'], saldo: ['brand', '💰 Saldo a favor'], perdido: ['', 'Sin devolución'], aplicado: ['', 'Saldo usado'] };
   const ESTADO_EST = { disponible: ['ok', 'Disponible'], ocupado: ['warn', 'Ocupado'], pausado: ['', 'Pausado'], oculto: ['bad', 'Oculto por el admin'] };
 
-  async function ajustesPub() {
-    if (ajustes) return ajustes;
-    try { ajustes = await Api.rpc('ajustes_publicos') || {}; } catch (e) { ajustes = {}; }
-    return ajustes;
-  }
   const precioTxt = (e) => [e.ph && clp(e.ph) + '/h', e.pd && clp(e.pd) + '/día', e.pm && clp(e.pm) + '/mes'].filter(Boolean).join(' · ');
   const volver = (txt) => '<button class="btn line small" onclick="history.length>1?history.back():location.hash=\'#/\'" style="margin-bottom:12px">' + ico('back') + ' ' + esc(txt || 'Volver') + '</button>';
   const cargando = () => { V.innerHTML = '<div class="spin"></div>'; };
@@ -1073,11 +1068,6 @@
       await Api.funcion('eliminar_usuario'); await Api.salir(); toast('Tu cuenta fue eliminada'); location.hash = '#/';
     }
   };
-  function vEditarPerfil(T) {
-    T = T || V;
-    T.innerHTML = '<div class="card" id="miPerfil"></div>';
-    g.CFX_PERFIL.montar($('miPerfil'));
-  }
 
   /* ======================= Verificación de identidad ======================= */
   function vVerificar() {
