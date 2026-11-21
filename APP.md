@@ -31,3 +31,4 @@
 - 🗂️ G117 (2.25): Más → 💳 Links de pago → cada espacio: 🏦 Escribir datos de banco por campos (núcleo CodeFixVitrina.transferencia opcional sobre .lkTxt; links_pago.texto). Reserva: texto en líneas + 📋 Copiar datos.
 - ⚠️ G128 b (2.31 · bd 71): _cobro_listo cuenta 🏦 links_pago.texto · Mis estacionamientos → CFX_COBRO.sinMedios (#pubSinMedio, Api.cuenta.link_listo) · vReserva sin url y con texto → 🏦 Transfiere + 📋. Prueba: SaaS/pruebas/g128b.js.
 - G140 (núcleo 3.36): Mi perfil → 🎨 Personalizar (ex Color y modo): temas listos, barra de abajo (tipo/tamaño/nombres), ↩️ de fábrica; se guarda en public.cfx_personal (nucleo/sql/personal.sql). Prueba: SaaS/pruebas/g140.js.
+- 📱 G141 (núcleo 3.37): 🔗 Mis redes (CodeFixVitrina.redes + nucleo/sql/redes.sql, gancho cfx_redes_llave_app en instalar/schema) y 🎬 Estudio por link + 📸 pantallazo + 📊 gráficos + 💡 ideas sin base (nucleo/est-links.js). Pruebas: SaaS/pruebas/g141.js, g141b.js.

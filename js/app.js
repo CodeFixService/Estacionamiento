@@ -126,6 +126,7 @@
       (ocup.length ? '<div class="sec-tit">Horarios ya reservados</div><div class="card small">' + ocup.map((o) => '<div>⛔ ' + esc(fh(o.inicio)) + ' → ' + esc(fh(o.fin)) + '</div>').join('') + '</div>' : '') +
       '<div class="sec-tit">Publicado por</div>' + (d.logueado ? '<a class="item" href="#/u/' + d.dueno.id + '">' : '<div class="item">') + avatar(d.dueno) + '<div class="grow"><b>' + nombreCon(d.dueno) + '</b><div class="small">' + estrellas(d.dueno.calif) +
       (d.dueno.calif_n ? ' <span class="muted">(' + d.dueno.calif_n + ')</span>' : '') + ' · <span class="muted">desde ' + fecha(d.dueno.desde) + '</span></div></div>' + (d.logueado ? '</a>' : '</div>') +
+      '<div id="dRedes" hidden style="margin-top:8px"></div>' +  // G141 a 📱 redes del dueño (núcleo)
       (!d.mio && !arr && d.estado === 'disponible' && !reservable ? '<div class="aviso warn" style="margin-top:12px">⏸️ Este estacionamiento no está recibiendo reservas por ahora. Puedes escribirle al dueño.</div>' : '') +
       (!d.mio && !arr && !reservable && d.g104 && d.g104.espera ? '<button class="btn sec block" id="dEspera" style="margin-top:12px">' + (d.g104.espera.anotado ? '🔕 Salir de la lista de espera' : '🔔 Avísame cuando se libere') + '</button>' : '') +
       (d.mio && d.g104 && d.g104.espera && d.g104.espera.personas ? '<a class="aviso" style="display:block;margin-top:12px;color:var(--ink)" href="#/mas/avisame">🔔 ' + d.g104.espera.personas + ' en lista de espera · Ver →</a>' : '') +
@@ -150,6 +151,7 @@
     }
     const conSesion = (fn, motivo) => () => (Api.logueado() ? fn() : (destino = '#/e/' + d.id, pedirLogin(motivo)));
     if ($('dSol')) $('dSol').onclick = conSesion(() => reservar(d), 'Crea tu cuenta para reservar');
+    if (window.CodeFixVitrina && CodeFixVitrina.redes && $('dRedes')) CodeFixVitrina.redes.publico($('dRedes'), { rpc: (f, x) => Api.rpc(f, x), llave: d.id, titulo: 'Redes de ' + String((d.dueno && d.dueno.nombre) || 'el dueño').split(' ')[0] });  // G141 a
     $('dChat').onclick = conSesion(() => contactar(d.dueno.id), 'Crea tu cuenta para contactar al dueño');
     $('dFav').onclick = conSesion(async () => {
       try { const si = await Api.rpc('favorito', { p_id: d.id }); $('dFav').style.color = si ? '#e11d48' : ''; toast(si ? 'Guardado en favoritos ❤️' : 'Quitado de favoritos'); }
@@ -653,6 +655,7 @@
         !adm && { k: 'acceso', ico: '🔑', t: 'Control de acceso', d: 'Valida el pase QR de cada reserva', grupo: g, abrir: en(vAcceso) },
         !adm && { k: 'descuentos', ico: '🏷️', t: 'Descuento por estadía larga', grupo: g, abrir: en(vDescuentos) },
         !adm && { k: 'ganancias', ico: '💰', t: 'Ganancias y ocupación', grupo: g, abrir: en(vGanancias) },
+        !adm && window.CodeFixVitrina && CodeFixVitrina.redes && { k: 'misredes', ico: '📱', t: 'Mis redes', d: 'Instagram, TikTok… con ícono en tus avisos', grupo: g, abrir: en((T) => CodeFixVitrina.redes.editor(T, { rpc: (f, x) => Api.rpc(f, x) })) },  // G141 a (núcleo)
         !adm && { k: 'estudio', ico: '🎬', t: 'Estudio de contenido', d: 'Ideas para tus redes listas para copiar', grupo: g, abrir: en((T) => window.CFX_ESTUDIO ? CFX_ESTUDIO.montar(T, { rpc: (f, x) => Api.rpc(f, x), probar: (k) => verModulo(k) }) : (T.innerHTML = '<div class="vacio">Actualiza la app</div>')) },  // G112 d (núcleo)
         !adm && { k: 'tarifas', ico: '🌙', t: 'Tarifa fin de semana y noche', grupo: g, abrir: en(vTarifas) },
         !adm && { k: 'frecuentes', ico: '🔁', t: 'Clientes frecuentes', d: 'Quién vuelve y su premio', grupo: g, abrir: en(vFrecuentes) },
