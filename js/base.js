@@ -203,7 +203,7 @@
   function avatar(p, cls) {
     p = p || {};
     const inicial = (p.nombre || '?').trim().charAt(0).toUpperCase() || '?';
-    const dentro = p.avatar ? '<img src="' + esc(urlFoto(p.avatar)) + '" alt="" loading="lazy">' : esc(p.icono || inicial);
+    const dentro = p.avatar ? '<img src="' + esc(urlFoto(p.avatar)) + '" alt="" loading="lazy">' : esc(inicial);  // G148: foto o letra del nombre (sin ícono)
     return '<span class="av ' + (cls || '') + (p.premium ? ' prem' : '') + '" style="--c:' + esc(/^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#2563eb') + '">' + dentro + '</span>';
   }
   const nombreCon = (p) => esc(p.nombre || 'Usuario') + (p.verificado ? ' ' + sello : '') + (p.premium && !p.admin ? ' <span class="pill gold" style="padding:1px 6px">PRO</span>' : '') + (p.admin ? ' <span class="pill brand" style="padding:1px 6px">Soporte</span>' : '');
