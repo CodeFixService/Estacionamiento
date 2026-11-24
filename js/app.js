@@ -1190,7 +1190,14 @@
       U.ponerIconos($('avC'));
       $('avC').onclick = async (ev) => {
         const b = ev.target.closest('[data-quitar]'), todo = ev.target.closest('#avTodo');
-        if (!b && !todo) { if (ev.target.closest('a.item')) cerrarModal(); return; }
+        if (!b && !todo) {
+          const it = ev.target.closest('a.item'); if (!it) return;
+          // G154: 🔄 versión / 💬 soporte / sin destino → lo abre el núcleo (ventana con la versión, chat, texto); lo demás va a su pantalla.
+          const n = r[[...$('avC').querySelectorAll('a.item')].indexOf(it)], C = window.CFX_AYUDA;
+          cerrarModal();
+          if (n && C && C.tocarAviso && C.tocarAviso({ titulo: n.titulo, cuerpo: n.cuerpo, fecha: n.fecha, url: n.url })) ev.preventDefault();
+          return;
+        }
         ev.preventDefault();
         if (todo && !await confirmar('¿Borrar todos tus avisos?', 'Borrar', true)) return;
         if (todo && window.CFX_ANIM) await window.CFX_ANIM.salirTodos();
