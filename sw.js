@@ -1,6 +1,6 @@
 /* Service worker de Estaciona: guarda la app en el celular para que abra rápido.
    Al publicar una versión nueva, cambia VERSION: la app muestra "Actualizar". */
-const VERSION = 'est-2.14.53';
+const VERSION = 'est-2.14.54';
 const ARCHIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/config.js', 'js/filtro.js', 'css/vendor/letras/inter.woff2', 'css/vendor/letras/roboto.woff2', 'css/vendor/letras/open-sans.woff2', 'css/vendor/letras/montserrat.woff2', 'css/vendor/letras/nunito.woff2', 'js/ui.js', 'css/vendor/bootstrap-utilities.min.css', 'js/seguro.js', 'js/vitrina.js', 'js/datos.js', 'js/carga.js', 'js/ayuda.js', 'js/est-motor.js', 'js/est-importador.js', 'js/est-links.js', 'js/estudio.js', 'js/qr.js', 'js/comprobante.js', 'js/modulos.js', 'js/premium.js', 'js/humano.js', 'js/verificar.js', 'js/pagos.js', 'js/respaldo.js', 'js/voz.js', 'js/fotos.js', 'js/auto.js', 'js/barra.js', 'css/tema.css', 'js/base.js', 'js/iconos.js', 'js/instalar.js', 'js/mapa.js', 'js/app.js', 'js/admin.js',
