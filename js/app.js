@@ -652,6 +652,7 @@
         !adm && { k: 'ganancias', ico: '💰', t: 'Ganancias y ocupación', grupo: g, abrir: en(vGanancias) },
         !adm && window.CodeFixVitrina && CodeFixVitrina.redes && { k: 'misredes', ico: '📱', t: 'Mis redes', d: 'Instagram, TikTok… con ícono en tus avisos', grupo: g, abrir: en((T) => CodeFixVitrina.redes.editor(T, { rpc: (f, x) => Api.rpc(f, x) })) },  // G141 a (núcleo)
         !adm && { k: 'estudio', ico: '🎬', t: 'Estudio de contenido', d: 'Ideas para tus redes listas para copiar', grupo: g, abrir: en((T) => window.CFX_ESTUDIO ? CFX_ESTUDIO.montar(T, { rpc: (f, x) => Api.rpc(f, x), probar: (k) => verModulo(k) }) : (T.innerHTML = '<div class="vacio">Actualiza la app</div>')) },  // G112 d (núcleo)
+        !adm && { k: 'recurrentes', ico: '🔁', t: 'Arriendos recurrentes', d: 'Arriendo mensual: se avisa y se cobra solo', grupo: g, abrir: en((T) => window.CFX_RECURRENTE ? CFX_RECURRENTE.montar(T, { rpc: (f, x) => Api.rpc(f, x), probar: (k) => verModulo(k) }) : (T.innerHTML = '<div class="vacio">Actualiza la app</div>')) },  // G162 (núcleo)
         !adm && { k: 'tarifas', ico: '🌙', t: 'Tarifa fin de semana y noche', grupo: g, abrir: en(vTarifas) },
         !adm && { k: 'frecuentes', ico: '🔁', t: 'Clientes frecuentes', d: 'Quién vuelve y su premio', grupo: g, abrir: en(vFrecuentes) },
         !adm && { k: 'calendario', ico: '📅', t: 'Cerrar fechas', d: 'Vacaciones o uso propio', grupo: g, abrir: en(vCalendario) },
