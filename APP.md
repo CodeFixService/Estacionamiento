@@ -35,3 +35,6 @@
 - 🛡️ G144 (núcleo 3.40): sin fila "Panel de administración" ni limpieza/respaldo dentro de la app (todo en CM → Apps) · .cfx-num/.cfx-redondo (círculo perfecto) · 🎤/⬜ = íconos de línea · 💬 WhatsApp del registro → Mis redes (cfx_redes_con_wa; gancho cfx_whatsapp_app donde aplica; uno solo, el botón antiguo se oculta con redes.unWa) · .assetsignore: notas, SQL y pruebas NO se publican.
 - 🙂 G148 (2.43, núcleo 3.43): perfiles sin ícono → foto o la letra del nombre (el ícono guardado se conserva, no se muestra).
 - 🔁 G162 (2.56 · bd 81, núcleo 3.56): módulo 'suscripciones' = 🔁 Arriendos recurrentes (núcleo recurrente.js; nombre + WhatsApp del arrendatario, sin cuenta amarrada). Gancho cfx_negocio_nombre_app (perfiles.nombre). Prueba g162b.js.
+
+## 📱 G164 (2.61 · bd 83, núcleo 3.62)
+- Máx. equipos por cuenta (tope del CM → Control → 📱 Equipos, por defecto 3): núcleo equipos.js en el <head> + sql/equipos.sql (bloque núcleo de instalar.sql). Sin código propio de la app. Mi perfil → Avanzado → 📱 Mis equipos. Prueba SaaS/pruebas/g164.js.
